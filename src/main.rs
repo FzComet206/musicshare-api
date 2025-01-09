@@ -1,4 +1,4 @@
-pub use self::error::{Error, Result};
+pub use self::utils::error::{Error, Result};
 
 use serde::Deserialize;
 use axum::response::{Html, IntoResponse};
@@ -8,8 +8,13 @@ use axum::Router;
 use tower_http::services::ServeDir;
 use std::net::SocketAddr;
 
-mod error;
+mod auth;
+mod config;
+mod db;
+mod media;
 mod routes;
+mod sessions;
+mod utils;
 // import error.rs module
 
 #[tokio::main]

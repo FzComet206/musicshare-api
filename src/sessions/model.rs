@@ -1,10 +1,11 @@
 // my in memory database layer
 
-use crate::{Error, Result};
+use crate::utils::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 // queue is a list of song ids, the queue can update dynamically
+#[derive(Clone, Debug, Serialize)]
 pub struct PlayQueue {
     pub queue: Vec<u64>,
 }
@@ -17,7 +18,7 @@ pub struct Session {
 
 #[derive(Clone)]
 pub struct ModelController {
-    pub sessions: Arc<Mutex<Vec<Session>>>,
+    pub sessions: Arc<Mutex<Vec<Option<Session>>>>,
 }
 
 // Constructor
@@ -33,30 +34,27 @@ impl ModelController {
     pub async fn create_session(&self, owner_id: u64) -> Result<(Session)> {
         let mut sessions = self.sessions.lock().unwrap();
 
-        let id = store.len() as u64 + 1;
+        let id = sessions.len() as u64 + 1;
         let session = Session {
             id,
             queue: PlayQueue { queue: Vec::new() },
         };
-        sessions.push(session.clone());
+        sessions.push(Some(session.clone()));
 
         Ok(session)
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {
         let sessions = self.sessions.lock().unwrap();
-        Ok(sessions.clone())
+        let copies = sessions.iter().filter_map(|t| t.clone()).collect();
+        Ok(copies)
     }
 
     pub async fn delete_session(&self, id: u64) -> Result<(Session)> {
         let mut sessions = self.sessions.lock().unwrap();
-        let session = sessions
-            .iter()
-            .position(|s| s.id == id)
-            .map(|i| sessions.remove(i))
-            .ok_or(Error::SessionNotFound)?;
+        let session = sessions.get_mut(id as usize).and_then( |f| f.take());
 
-        sessions.ok_or(Error::SessionDeleteFailIdNotFound { id })
+        session.ok_or(Error::SessionDeleteFailIdNotFound { id })
     }
 }
 
