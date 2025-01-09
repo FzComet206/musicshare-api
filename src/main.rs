@@ -9,7 +9,7 @@ use tower_http::services::ServeDir;
 use std::net::SocketAddr;
 
 mod error;
-mod web;
+mod route;
 // import error.rs module
 
 #[tokio::main]
@@ -18,7 +18,7 @@ async fn main() {
     // joining routes 
     let routes_hello = Router::new()
     .merge(routes_hello())
-    .merge(web::routes_login::routes())
+    .merge(route::routes_login::routes())
     .fallback_service(routes_static());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -33,7 +33,6 @@ async fn main() {
 fn routes_static() -> Router {
     Router::new().nest_service("/", get_service(ServeDir::new("./")))
 }
-
 
 // joined routes hello
 fn routes_hello() -> Router {
