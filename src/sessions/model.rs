@@ -14,7 +14,8 @@ pub struct PlayQueue {
 pub struct Session {
     pub id: u64,
     pub queue: PlayQueue,
-    pub peer: String
+    pub broadcaster: String,
+    pub listener: String,
 } 
 
 #[derive(Clone)]
@@ -39,7 +40,8 @@ impl ModelController {
         let session = Session {
             id,
             queue: PlayQueue { queue: Vec::new() },
-            peer: String::from("Test peer string"),
+            broadcaster: String::from("Test broadcaster string"),
+            listener: String::from("Test listener string"),
         };
         sessions.push(Some(session.clone()));
 
