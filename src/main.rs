@@ -5,25 +5,29 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, get_service};
 use axum::extract::{Path, Query};
 use axum::Router;
+use sessions::ModelController;
 use tower_http::services::ServeDir;
 use std::net::SocketAddr;
 
 mod auth;
-mod config;
 mod db;
 mod media;
 mod routes;
 mod sessions;
 mod utils;
+mod state;
 // import error.rs module
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
+
+    let mc = ModelController::new().await?;
     
     // joining routes 
     let routes_hello = Router::new()
     .merge(routes_hello())
     .merge(routes::routes_login::routes())
+    .nest("/api", routes::session::routes(mc.clone()))
     .fallback_service(routes_static());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -33,6 +37,8 @@ async fn main() {
         .serve(routes_hello.into_make_service())
         .await
         .unwrap();
+
+    Ok(())
 }
 
 fn routes_static() -> Router {
@@ -63,4 +69,5 @@ async fn handler_hello(Query(params): Query<HelloParams>) -> impl IntoResponse {
 // example for use of Path params
 async fn handler_hello_path(Path(name): Path<String>) -> impl IntoResponse {
     println!("->> {:<12} - handler_hello_path - {name:?}", "Handler");
-    Html(format!("Hello Path, {name}!")) }
+    Html(format!("Hello Path, {name}!")) 
+}

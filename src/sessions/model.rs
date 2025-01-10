@@ -14,6 +14,7 @@ pub struct PlayQueue {
 pub struct Session {
     pub id: u64,
     pub queue: PlayQueue,
+    pub peer: String
 } 
 
 #[derive(Clone)]
@@ -31,13 +32,14 @@ impl ModelController {
 }
 
 impl ModelController {
-    pub async fn create_session(&self, owner_id: u64) -> Result<(Session)> {
+    pub async fn create_session(&self) -> Result<(Session)> {
         let mut sessions = self.sessions.lock().unwrap();
 
-        let id = sessions.len() as u64 + 1;
+        let id = sessions.len() as u64;
         let session = Session {
             id,
             queue: PlayQueue { queue: Vec::new() },
+            peer: String::from("Test peer string"),
         };
         sessions.push(Some(session.clone()));
 
