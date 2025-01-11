@@ -12,6 +12,8 @@ use std::net::SocketAddr;
 
 use models::SessionController;
 use media::converter::Converter;
+use tower_http::cors::{Any, CorsLayer};
+use axum::http::Method;
 
 mod auth;
 mod db;
@@ -21,8 +23,10 @@ mod models;
 mod utils;
 // import error.rs module
 
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    
 
     // initialize gstreamer
     Converter::init();
@@ -32,6 +36,12 @@ async fn main() -> Result<()> {
     let mc = SessionController::new().await?;
     
     // joining routes 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
+        .allow_headers(Any);
+
+
     let routes_hello = Router::new()
     .merge(routes_hello())
     .merge(routes::routes_login::routes())

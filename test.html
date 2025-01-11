@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC Test</title>
+</head>
+<body>
+    <h1>WebRTC Test</h1>
+    <script>
+        (async function () {
+            const SERVER_URL = "http://localhost:3000"; // Replace with your server's URL if different
+
+            // Fetch SDP offer from the server
+            async function getOffer() {
+                const response = await fetch(`${SERVER_URL}/offer`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to get offer: ${response.statusText}`);
+                }
+                const data = await response.json();
+                console.log("Received SDP Offer:", data.sdp);
+                return data.sdp;
+            }
+
+            // Send SDP answer to the server
+            async function sendAnswer(sdp) {
+                const response = await fetch(`${SERVER_URL}/answer`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sdp }),
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to send answer: ${response.statusText}`);
+                }
+                console.log("SDP Answer sent successfully!");
+            }
+
+            // Main function to set up WebRTC connection
+            async function testWebRTC() {
+                try {
+                    // Step 1: Create a new RTCPeerConnection
+                    const peerConnection = new RTCPeerConnection();
+
+                    // Step 2: Get the SDP offer from the server
+                    const offer = await getOffer();
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: offer }));
+
+                    // Step 3: Create an SDP answer
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    console.log("Generated SDP Answer:", answer.sdp);
+
+                    // Step 4: Send the SDP answer to the server
+                    await sendAnswer(answer.sdp);
+
+                    // Step 5: Handle incoming audio stream
+                    peerConnection.ontrack = (event) => {
+                        const audioElement = document.createElement("audio");
+                        audioElement.srcObject = event.streams[0];
+                        audioElement.autoplay = true;
+                        document.body.appendChild(audioElement);
+                        console.log("Audio stream received and playing.");
+                    };
+
+                    console.log("WebRTC connection established!");
+                } catch (error) {
+                    console.error("Error during WebRTC setup:", error);
+                }
+            }
+
+            // Run the test
+            await testWebRTC();
+        })();
+    </script>
+</body>
+</html>
