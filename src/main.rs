@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 pub use self::utils::error::{Error, Result};
 
 use serde::Deserialize;
@@ -5,23 +7,29 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, get_service};
 use axum::extract::{Path, Query};
 use axum::Router;
-use sessions::ModelController;
 use tower_http::services::ServeDir;
 use std::net::SocketAddr;
+
+use models::SessionController;
+use media::converter::Converter;
 
 mod auth;
 mod db;
 mod media;
 mod routes;
-mod sessions;
+mod models;
 mod utils;
-mod state;
 // import error.rs module
 
 #[tokio::main]
 async fn main() -> Result<()> {
 
-    let mc = ModelController::new().await?;
+    // initialize gstreamer
+    Converter::init();
+    // Converter::convert_to_opus("test.weba", "output2.ogg");
+    
+    // initialize session controller
+    let mc = SessionController::new().await?;
     
     // joining routes 
     let routes_hello = Router::new()

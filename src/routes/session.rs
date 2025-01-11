@@ -1,5 +1,5 @@
-use crate::sessions::model::{
-    ModelController,
+use crate::models::session::{
+    SessionController,
     Session,
     PlayQueue,
 };
@@ -13,7 +13,7 @@ use axum::routing::{
 };
 use serde::Deserialize;
 
-pub fn routes(mc: ModelController) -> Router {
+pub fn routes(mc: SessionController) -> Router {
     Router::new()
         .route("/session", post(create_session)
             .get(list_sesisons)
@@ -27,7 +27,7 @@ struct SessionParams {
 }
 
 async fn create_session(
-    State(mc): State<ModelController>,
+    State(mc): State<SessionController>,
 ) -> Result<Json<Session>> {
     println!("->> {:<12} - create_session", "Handler");
 
@@ -37,7 +37,7 @@ async fn create_session(
 }
 
 async fn list_sesisons(
-    State(mc): State<ModelController>
+    State(mc): State<SessionController>
 ) -> Result<Json<Vec<Session>>> {
     println!("->> {:<12} - list_sessions", "Handler");
 
@@ -48,7 +48,7 @@ async fn list_sesisons(
 }
 
 async fn delete_session(
-    State(mc): State<ModelController>,
+    State(mc): State<SessionController>,
     Query(params) : Query<SessionParams>,
 ) -> Result<Json<Session>> {
     println!("->> {:<12} - delete_session", "Handler");
