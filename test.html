@@ -5,27 +5,32 @@
 </head>
 <body>
     <h1>WebRTC Test</h1>
+    <!-- Audio player element for playback -->
+    <audio id="audioPlayer" autoplay controls></audio>
+
     <script>
         (async function () {
             const SERVER_URL = "http://localhost:3000"; // Replace with your server's URL if different
 
+            const audioPlayer = document.getElementById("audioPlayer");
+
             // Fetch SDP offer from the server
             async function getOffer() {
-                const response = await fetch(`${SERVER_URL}/offer`, {
-                    method: "POST",
+                const response = await fetch(`${SERVER_URL}/api/session`, {
+                    method: "GET",
                     headers: { "Content-Type": "application/json" },
                 });
                 if (!response.ok) {
                     throw new Error(`Failed to get offer: ${response.statusText}`);
                 }
                 const data = await response.json();
-                console.log("Received SDP Offer:", data.sdp);
-                return data.sdp;
+                console.log("Received SDP Offer:", data.offer);
+                return data.offer;
             }
 
             // Send SDP answer to the server
             async function sendAnswer(sdp) {
-                const response = await fetch(`${SERVER_URL}/answer`, {
+                const response = await fetch(`${SERVER_URL}/api/set_answer`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ sdp }),
@@ -36,32 +41,63 @@
                 console.log("SDP Answer sent successfully!");
             }
 
+            // Wait for ICE gathering to complete
+            function waitForIceGatheringComplete(peerConnection) {
+                return new Promise((resolve) => {
+                    if (peerConnection.iceGatheringState === "complete") {
+                        resolve();
+                    } else {
+                        const listener = () => {
+                            if (peerConnection.iceGatheringState === "complete") {
+                                peerConnection.removeEventListener("icegatheringstatechange", listener);
+                                resolve();
+                            }
+                        };
+                        peerConnection.addEventListener("icegatheringstatechange", listener);
+                    }
+                });
+            }
+
             // Main function to set up WebRTC connection
             async function testWebRTC() {
                 try {
                     // Step 1: Create a new RTCPeerConnection
-                    const peerConnection = new RTCPeerConnection();
+                    const peerConnection = new RTCPeerConnection({
+                        iceServers: [
+                            { urls: "stun:stun.l.google.com:19302" },
+                        ],
+                        iceTransportPolicy: "relay",
+                    });
+
+                    peerConnection.addEventListener("icecandidate", (event) => {
+                        if (event.candidate) {
+                            console.log("New ICE candidate:", event.candidate.candidate);
+                        } else {
+                            console.log("All ICE candidates have been gathered.");
+                        }
+                    });
 
                     // Step 2: Get the SDP offer from the server
                     const offer = await getOffer();
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: offer }));
+                    await peerConnection.setRemoteDescription(
+                        new RTCSessionDescription({ type: "offer", sdp: offer })
+                    );
 
                     // Step 3: Create an SDP answer
                     const answer = await peerConnection.createAnswer();
                     await peerConnection.setLocalDescription(answer);
-                    console.log("Generated SDP Answer:", answer.sdp);
 
-                    // Step 4: Send the SDP answer to the server
-                    await sendAnswer(answer.sdp);
+                    // Step 4: Wait for ICE gathering to complete
+                    await waitForIceGatheringComplete(peerConnection);
 
-                    // Step 5: Handle incoming audio stream
-                    peerConnection.ontrack = (event) => {
-                        const audioElement = document.createElement("audio");
-                        audioElement.srcObject = event.streams[0];
-                        audioElement.autoplay = true;
-                        document.body.appendChild(audioElement);
-                        console.log("Audio stream received and playing.");
-                    };
+                    // Step 5: Send the SDP answer with ICE credentials to the server
+                    await sendAnswer(peerConnection.localDescription.sdp);
+
+                    // Step 6: Handle incoming audio stream
+                    peerConnection.addEventListener("broadcaster", (event) => {
+                        console.log("Audio track received:", event.streams[0]);
+                        audioPlayer.srcObject = event.streams[0]; // Attach the remote audio stream to the audio player
+                    });
 
                     console.log("WebRTC connection established!");
                 } catch (error) {

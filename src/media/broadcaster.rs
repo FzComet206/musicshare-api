@@ -16,8 +16,10 @@ use webrtc::media::Sample;
 use tokio::{fs::File, io::AsyncReadExt, time::interval};
 use axum::body::Bytes;
 use tokio::sync::Mutex;
+use serde::Serialize;
 
 
+#[derive(Clone, Debug)]
 pub struct Broadcaster {
     peer_connection: Arc<RTCPeerConnection>,
     audio_track: Option<Arc<TrackLocalStaticSample>>,
@@ -47,6 +49,7 @@ impl Broadcaster {
         // Create a new RTCPeerConnection
         let peer_connection = api.new_peer_connection(config).await?;
 
+
         Ok(Self {
             audio_track: None,
             peer_connection: Arc::new(peer_connection),
@@ -67,13 +70,18 @@ impl Broadcaster {
         ));
 
         self.peer_connection.add_track(track.clone()).await?;
+        // get self.peer connection's track
+
         self.audio_track = Some(track);
         Ok(())
     }
 
     pub async fn get_sdp_offer(&self) -> Result<String> {
+        println!("->> {:<12} - get_sdp_offer", "Broadcaster");
+
         let offer = self.peer_connection.create_offer(None).await?;
         self.peer_connection.set_local_description(offer).await?;
+
 
         if let Some(local_description) = self.peer_connection.local_description().await {
             Ok(local_description.sdp)
@@ -84,6 +92,7 @@ impl Broadcaster {
 
     /// Sets an SDP answer
     pub async fn set_sdp_answer(&self, sdp: String) -> Result<()> {
+        println!("->> {:<12} - set_sdp_answer", "Broadcaster");
         let remote_desc = RTCSessionDescription::answer(sdp)?;
         self.peer_connection.set_remote_description(remote_desc).await
     }
@@ -103,6 +112,7 @@ impl Broadcaster {
         let mut buffer = [0u8; 4096]; // Adjust size based on codec requirements
         let mut ticker = interval(Duration::from_millis(20)); // Example 20ms interval
 
+
         while let Ok(bytes_read) = file.read(&mut buffer).await {
             if bytes_read == 0 {
                 break; // End of file
@@ -116,6 +126,7 @@ impl Broadcaster {
                 }
             }
 
+            // print bytes_read
             if let Some(track) = &self.audio_track {
                 ticker.tick().await; // Wait for the next interval
 

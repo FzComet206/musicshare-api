@@ -14,6 +14,7 @@ use models::SessionController;
 use media::converter::Converter;
 use tower_http::cors::{Any, CorsLayer};
 use axum::http::Method;
+use std::sync::Arc;
 
 mod auth;
 mod db;
@@ -30,10 +31,10 @@ async fn main() -> Result<()> {
 
     // initialize gstreamer
     Converter::init();
-    // Converter::convert_to_opus("test.weba", "output2.ogg");
+    // Converter::convert_to_opus("test2.mp3", "output2.ogg");
     
     // initialize session controller
-    let mc = SessionController::new().await?;
+    let mc = Arc::new(SessionController::new().await?);
     
     // joining routes 
     let cors = CorsLayer::new()
@@ -46,7 +47,8 @@ async fn main() -> Result<()> {
     .merge(routes_hello())
     .merge(routes::routes_login::routes())
     .nest("/api", routes::session::routes(mc.clone()))
-    .fallback_service(routes_static());
+    .fallback_service(routes_static())
+    .layer(cors);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("->> Server listening on port 3000");
