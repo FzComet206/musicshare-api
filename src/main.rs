@@ -30,8 +30,8 @@ async fn main() -> Result<()> {
     
 
     // initialize gstreamer
-    Converter::init();
-    // Converter::convert_to_opus("test2.mp3", "output2.ogg");
+    // Converter::init();
+    // Converter::convert_to_opus("short.mp4", "short.ogg");
     
     // initialize session controller
     let mc = Arc::new(SessionController::new().await?);

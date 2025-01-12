@@ -1,7 +1,6 @@
 use crate::models::session::{
     SessionController,
     Session,
-    PlayQueue,
 };
 
 use crate::Result;
@@ -47,11 +46,6 @@ async fn create_session(
     println!("->> {:<12} - create_session", "Handler");
 
     let mut session = mc.create_session().await?;
-    // cannot return session object because its not serializable
-
-    // add audio track to session before sending offer for complete sdp
-    session.broadcaster.add_audio_track("audio/opus").await.unwrap();
-    session.broadcaster.broadcast_audio_from_file("output2.ogg").await.unwrap();
     
     Ok(Json(json!({
         "status": "ok",
@@ -90,8 +84,7 @@ async fn set_answer(
 
     // get first element from mc.sessions
     let session = mc.get_session(0).await?;
-
-    session.broadcaster.set_sdp_answer(body.sdp).await.unwrap();
+    session.set_sdp_answer(body.sdp).await.unwrap();
 
     Ok(Json(json!({
         "status": "ok",
@@ -107,25 +100,16 @@ async fn broadcast(
 
     // get first element from mc.sessions
     let mut session = mc.get_session(0).await?;
+    session.broadcaster.broadcast_audio_from_file("output2.ogg").await.unwrap();
+
+
+    // broadcasting function blocks until it is done, and works
 
     // session.broadcaster.add_audio_track("audio/opus").await.unwrap();
+    // println!("audio track: {:?}", session.broadcaster.audio_track);
 
     Ok(Json(json!({
         "status": "ok",
         "message": "Broadcasting",
     })))
 }
-
-
-
-//async fn delete_session(
-    //State(mc): State<SessionController>,
-    //Query(params) : Query<SessionParams>,
-//) -> Result<Json<Session>> {
-    //println!("->> {:<12} - delete_session", "Handler");
-
-    //// list all sessions
-    //let session = mc.delete_session(params.id).await?;
-
-    //Ok(Json(session))
-//}

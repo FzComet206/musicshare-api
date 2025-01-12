@@ -13,6 +13,21 @@
             const SERVER_URL = "http://localhost:3000"; // Replace with your server's URL if different
 
             const audioPlayer = document.getElementById("audioPlayer");
+            const audioElement = document.querySelector("#audioPlayer");
+console.log("Audio element state:", {
+    muted: audioElement.muted,
+    autoplay: audioElement.autoplay,
+    srcObject: audioElement.srcObject,
+});
+
+            // a buttion that will trigger the audio to play
+            const playButton = document.createElement("button");
+            playButton.textContent = "Play Audio";
+            playButton.addEventListener("click", () => {
+                audioElement.play();
+            });
+            document.body.appendChild(playButton);
+            
 
             // Fetch SDP offer from the server
             async function getOffer() {
@@ -69,12 +84,20 @@
                         iceTransportPolicy: "relay",
                     });
 
+
                     peerConnection.addEventListener("icecandidate", (event) => {
                         if (event.candidate) {
                             console.log("New ICE candidate:", event.candidate.candidate);
                         } else {
                             console.log("All ICE candidates have been gathered.");
                         }
+                    });
+
+                    peerConnection.addEventListener("track", (event) => {
+                        console.log("Audio track received:", event.streams[0]);
+                        console.log("Track received:", event.track);
+                        document.querySelector("#audioPlayer").srcObject = event.streams[0];
+                        audioPlayer.srcObject = event.streams[0]; // Attach the remote audio stream to the audio player
                     });
 
                     // Step 2: Get the SDP offer from the server
@@ -94,10 +117,7 @@
                     await sendAnswer(peerConnection.localDescription.sdp);
 
                     // Step 6: Handle incoming audio stream
-                    peerConnection.addEventListener("broadcaster", (event) => {
-                        console.log("Audio track received:", event.streams[0]);
-                        audioPlayer.srcObject = event.streams[0]; // Attach the remote audio stream to the audio player
-                    });
+
 
                     console.log("WebRTC connection established!");
                 } catch (error) {

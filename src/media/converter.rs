@@ -14,7 +14,7 @@ impl Converter {
 
     pub fn convert_to_opus(input: &str, output: &str) -> Result<(), Box<dyn Error>> {
         let pipeline = gst::parse_launch(&format!(
-            "filesrc location={} ! decodebin ! audioconvert ! audioresample ! opusenc ! oggmux ! filesink location={}",
+            "filesrc location={} ! decodebin ! audioconvert ! audioresample ! opusenc bitrate=64000 ! oggmux ! filesink location={}",
             input, output
         ))?;
 
