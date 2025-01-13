@@ -12,6 +12,9 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::sdp::sdp_type::RTCSdpType;
+use webrtc::data_channel::RTCDataChannel;
+use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
+use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 
 #[derive(Clone, Debug)]
 pub struct Session {
@@ -42,7 +45,22 @@ impl Session {
         };
 
         // Create a new RTCPeerConnection
-        let peer_connection = api.new_peer_connection(config).await.unwrap();
+        let peer_connection = api.new_peer_connection(config).await?;
+        peer_connection.on_peer_connection_state_change(Box::new(|state| {
+            println!("Peer Connection State Change: {:?}", state);
+            Box::pin(async {})
+        }));
+
+        peer_connection.on_ice_connection_state_change(Box::new(|state| {
+            println!("ICE Connection State Change: {:?}", state);
+            Box::pin(async {})
+        }));
+
+        peer_connection.on_signaling_state_change(Box::new(|state| {
+            println!("Signaling State Change: {:?}", state);
+            Box::pin(async {})
+        }));
+
 
         Ok(Self {
             id: 0,
@@ -56,7 +74,7 @@ impl Session {
         println!("->> {:<12} - get_sdp_offer", "Broadcaster");
 
         let offer = self.peer_connection.create_offer(None).await.unwrap();
-        self.peer_connection.set_local_description(offer).await;
+        self.peer_connection.set_local_description(offer).await?;
 
 
         let mut local_description = self.peer_connection.local_description().await.unwrap();
@@ -68,17 +86,25 @@ impl Session {
         println!("->> {:<12} - set_sdp_answer", "Broadcaster");
         let remote_desc = RTCSessionDescription::answer(sdp)?;
         self.peer_connection.set_remote_description(remote_desc).await?;
+
         Ok(())
     }
 
-    pub async fn connect(&self) -> Result<String> {
-
-        // get sdp offer from broadcaster
-        println!("->> {:<12} - connect", "Session");
-        let sdp_offer = self.get_sdp_offer().await.unwrap();
-
-        Ok(sdp_offer)
+    pub async fn add_ice_candidate(&self, candidate: RTCIceCandidateInit)-> Result<()> {
+        println!("->> {:<12} - add_ice_candidate", "Broadcaster");
+        println!("Adding ICE candidate: {:?}", candidate.candidate);
+        self.peer_connection.add_ice_candidate(candidate).await?;
+        Ok(())
     }
+
+    // pub async fn connect(&self) -> Result<String> {
+
+        // // get sdp offer from broadcaster
+        // println!("->> {:<12} - connect", "Session");
+        // let sdp_offer = self.get_sdp_offer().await.unwrap();
+
+        // Ok(sdp_offer)
+    // }
 
 }
 
@@ -106,7 +132,9 @@ impl SessionController{
         let mut session = Session::new().await?;
 
         session.broadcaster.add_audio_track("audio/opus", session.peer_connection.clone()).await.unwrap();
+        session.broadcaster.broadcast_audio_from_file("output2.ogg");
         // session.broadcaster.broadcast_audio_from_file("output2.ogg");
+
 
         println!("session created");
 
@@ -118,7 +146,7 @@ impl SessionController{
     pub async fn get_session(&self, id: u64) -> Result<Session> {
         let sessions = self.sessions.lock().await;
         let session = sessions.get(id as usize).and_then(|f| f.clone());
-        session.ok_or(Error::SessionDeleteFailIdNotFound{ id })
+        session.ok_or(Error::SessionNotFound { id })
     }
 }
 

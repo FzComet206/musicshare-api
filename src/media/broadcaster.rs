@@ -23,7 +23,7 @@ use webrtc::rtp::extension::audio_level_extension::AudioLevelExtension;
 #[derive(Clone, Debug)]
 pub struct Broadcaster {
     pub audio_track: Option<Arc<TrackLocalStaticSample>>,
-    pub is_broadcasting: Arc<Mutex<bool>>, 
+    // pub is_broadcasting: Arc<Mutex<bool>>, 
 }
 
 impl Broadcaster {
@@ -32,7 +32,7 @@ impl Broadcaster {
         // Create a MediaEngine
         Ok(Self {
             audio_track: None,
-            is_broadcasting: Arc::new(Mutex::new(false)),
+            // is_broadcasting: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -45,7 +45,7 @@ impl Broadcaster {
                 ..Default::default()
             },
             "audio".to_string(),
-            "Broadcaster".to_string(),
+            "broadcaster".to_string(),
         ));
 
         peer_connection.add_track(track.clone()).await?;
@@ -59,21 +59,19 @@ impl Broadcaster {
 
     pub async fn broadcast_audio_from_file(&self, file_path: &str) -> Result<()> {
 
-        {
-            let mut broadcasting = self.is_broadcasting.lock().await;
-            *broadcasting = true;
-        }
         // Open the file asynchronously
-        let mut file = File::open(file_path).await.map_err(|e| {
-            Error::new(format!("Failed to open file {}: {}", file_path, e))
-        })?;
+        // let mut file = File::open(file_path).await.map_err(|e| {
+            // Error::new(format!("Failed to open file {}: {}", file_path, e))
+        // })?;
+
+        let mut file = tokio::fs::File::open(file_path).await.unwrap();
         
         // Buffer to read chunks of data
         let samples_per_channel = 960; // 20ms of audio at 48kHz
         let channels = 2; // Stereo
         let bytes_per_sample = 2; // 16-bit PCM
         let frame_size = samples_per_channel * channels * bytes_per_sample;
-        let mut buffer = vec![0u8; frame_size];
+        let mut buffer = vec![0; frame_size];
 
         // let mut buffer = [0u8; frame_size]; // Adjust size based on codec requirements
         let mut ticker = interval(Duration::from_millis(20)); // Example 20ms interval
@@ -83,15 +81,6 @@ impl Broadcaster {
             if bytes_read == 0 {
                 break; // End of file
             }
-
-            // Check if broadcasting is still active
-            {
-                let broadcasting = self.is_broadcasting.lock().await;
-                if !*broadcasting {
-                    break;
-                }
-            }
-
 
             // print bytes_read
             if let Some(track) = &self.audio_track {
@@ -108,6 +97,7 @@ impl Broadcaster {
                 )
                 .write_sample(&Sample {
                     data: Bytes::copy_from_slice(&buffer[..bytes_read]), // Convert to Bytes
+                    // data: Bytes::from_static(&[0;1024]),
                     duration: Duration::from_millis(20), // Example duration
                     ..Default::default()
                 }).await?;
@@ -120,8 +110,8 @@ impl Broadcaster {
         Ok(())
     }
 
-    pub async fn stop_broadcast(&self) {
-        let mut broadcasting = self.is_broadcasting.lock().await;
-        *broadcasting = false;
-    }
+    // pub async fn stop_broadcast(&self) {
+        // let mut broadcasting = self.is_broadcasting.lock().await;
+        // *broadcasting = false;
+    // }
 }

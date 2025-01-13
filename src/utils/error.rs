@@ -6,7 +6,8 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub enum Error {
     LoginFail,
     SessionDeleteFailIdNotFound { id: u64 },
-    WebRTCErr,
+    SessionNotFound { id: u64 },
+    WebRTCErr { source: String },
 }
 
 impl IntoResponse for Error {
@@ -18,7 +19,9 @@ impl IntoResponse for Error {
 }
 
 impl From<webrtc::Error> for Error {
-    fn from(_: webrtc::Error) -> Self {
-        Error::WebRTCErr
+    fn from(err: webrtc::Error) -> Self {
+        Error::WebRTCErr {
+            source: format!("{:?}", err),
+        }
     }
 }

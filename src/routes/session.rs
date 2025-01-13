@@ -20,6 +20,7 @@ use axum::routing::{
 };
 use std::sync::Arc;
 use serde_json::{json, Value};
+use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
@@ -27,6 +28,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/session", get(join_session))
         .route("/set_answer", post(set_answer))
         .route("/broadcast", get(broadcast))
+        .route("/add_ice_candidate", post(add_ice_candidate))
         .with_state(mc)
 }
 
@@ -61,7 +63,8 @@ async fn join_session(
     // get first element from mc.sessions
     let session = mc.get_session(0).await?;
 
-    let offer = session.connect().await.unwrap();
+    // let offer = session.connect().await.unwrap();
+    let offer = session.get_sdp_offer().await.unwrap();
 
     Ok(Json(json!({
         "status": "ok",
@@ -73,6 +76,14 @@ async fn join_session(
 #[derive(Debug, Deserialize)]
 struct SDPAnswerRequest {
     sdp: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ICECandidateRequest{
+    candidate: String,
+    sdp_mid: Option<String>,
+    sdp_mline_index: Option<u16>,
+    username_fragment: Option<String>,
 }
 
 async fn set_answer(
@@ -92,6 +103,31 @@ async fn set_answer(
     })))
 }
 
+async fn add_ice_candidate(
+    // get request body
+    State(mc): State<Arc<SessionController>>,
+    Json(body): Json<ICECandidateRequest>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - add_ice_candidate", "Handler");
+
+    // get first element from mc.sessions
+    let session = mc.get_session(0).await?;
+
+    session.add_ice_candidate(
+        RTCIceCandidateInit {
+            candidate: body.candidate,
+            sdp_mid: body.sdp_mid,
+            sdp_mline_index: body.sdp_mline_index,
+            username_fragment: body.username_fragment,
+        }
+    ).await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "ice added",
+    })))
+}
+
 async fn broadcast(
     // get request body
     State(mc): State<Arc<SessionController>>,
@@ -100,11 +136,9 @@ async fn broadcast(
 
     // get first element from mc.sessions
     let mut session = mc.get_session(0).await?;
-    session.broadcaster.broadcast_audio_from_file("output2.ogg").await.unwrap();
 
 
     // broadcasting function blocks until it is done, and works
-
     // session.broadcaster.add_audio_track("audio/opus").await.unwrap();
     // println!("audio track: {:?}", session.broadcaster.audio_track);
 

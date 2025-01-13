@@ -6,28 +6,13 @@
 <body>
     <h1>WebRTC Test</h1>
     <!-- Audio player element for playback -->
-    <audio id="audioPlayer" autoplay controls></audio>
-
     <script>
         (async function () {
             const SERVER_URL = "http://localhost:3000"; // Replace with your server's URL if different
 
-            const audioPlayer = document.getElementById("audioPlayer");
-            const audioElement = document.querySelector("#audioPlayer");
-console.log("Audio element state:", {
-    muted: audioElement.muted,
-    autoplay: audioElement.autoplay,
-    srcObject: audioElement.srcObject,
-});
+            let iceCandidatesQueue = []; // Queue for ICE candidates
+            let answerSent = false; // Flag to check if the answer has been sent
 
-            // a buttion that will trigger the audio to play
-            const playButton = document.createElement("button");
-            playButton.textContent = "Play Audio";
-            playButton.addEventListener("click", () => {
-                audioElement.play();
-            });
-            document.body.appendChild(playButton);
-            
 
             // Fetch SDP offer from the server
             async function getOffer() {
@@ -54,6 +39,29 @@ console.log("Audio element state:", {
                     throw new Error(`Failed to send answer: ${response.statusText}`);
                 }
                 console.log("SDP Answer sent successfully!");
+
+                while (iceCandidatesQueue.length > 0) {
+                    const candidate = iceCandidatesQueue.shift();
+                    await sendIceCandidate(candidate);
+                }
+            }
+
+            // send ice candidate back to server
+            async function sendIceCandidate(candidate) {
+                const response = await fetch(`${SERVER_URL}/api/add_ice_candidate`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        candidate: candidate.candidate,
+                        sdp_mid: candidate.sdpMid,
+                        sdp_mline_index: candidate.sdpMLineIndex,
+                        username_fragment: candidate.usernameFragment,
+                    }),
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to send ICE candidate: ${response.statusText}`);
+                }
+                console.log("ICE Candidate sent successfully!");
             }
 
             // Wait for ICE gathering to complete
@@ -81,19 +89,57 @@ console.log("Audio element state:", {
                         iceServers: [
                             { urls: "stun:stun.l.google.com:19302" },
                         ],
-                        iceTransportPolicy: "relay",
                     });
 
+                    peerConnection.onconnectionstatechange = (event) => {
+                        console.log("Connection state change:", peerConnection.connectionState);
+                    };
+                    peerConnection.onicegatheringstatechange = (event) => {
+                        console.log("ice gathering state change:", peerConnection.iceGatheringState);
+                    };
 
-                    peerConnection.addEventListener("icecandidate", (event) => {
+                    // peerConnection.onicecandidate = async (event) => {
+                        // if (event.candidate) {
+                            // console.log("Generated ICE candidate:", event.candidate);
+                            // await sendIceCandidate(event.candidate);
+                            // console.log("ICE candidate sent to server");
+                        // } else {
+                            // console.log("All ICE candidates have been generated");
+                        // }
+                    // };
+                    peerConnection.onicecandidate = async (event) => {
                         if (event.candidate) {
-                            console.log("New ICE candidate:", event.candidate.candidate);
-                        } else {
-                            console.log("All ICE candidates have been gathered.");
-                        }
-                    });
+                            console.log("Generated ICE candidate:", event.candidate);
 
-                    peerConnection.addEventListener("track", (event) => {
+                            if (answerSent) {
+                                await sendIceCandidate(event.candidate);
+                                console.log("ICE candidate sent to server");
+                            } else {
+                                console.log("Queuing ICE candidate until SDP answer is sent");
+                                iceCandidatesQueue.push(event.candidate);
+                            }
+                        } else {
+                            console.log("All ICE candidates have been generated");
+                        }
+                    };
+
+
+                    peerConnection.ontrack = (event) => {
+                        console.log(event)
+                        console.log(event.track.enabled);
+                        event.track.muted = false;
+                        console.log(event.track.muted);
+
+                        const audio = new Audio();
+                        audio.srcObject = event.streams[0];
+                        console.log(audio.srcObject);
+                        audio.autoplay = true;
+                        audio.controls = true;
+                        document.body.appendChild(audio);
+                    };
+
+
+                    peerConnection.addEventListener("broadcaster", (event) => {
                         console.log("Audio track received:", event.streams[0]);
                         console.log("Track received:", event.track);
                         document.querySelector("#audioPlayer").srcObject = event.streams[0];
@@ -116,9 +162,10 @@ console.log("Audio element state:", {
                     // Step 5: Send the SDP answer with ICE credentials to the server
                     await sendAnswer(peerConnection.localDescription.sdp);
 
+                    // send ice candidate to server after sending remote description
+
+
                     // Step 6: Handle incoming audio stream
-
-
                     console.log("WebRTC connection established!");
                 } catch (error) {
                     console.error("Error during WebRTC setup:", error);
