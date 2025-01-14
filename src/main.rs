@@ -35,6 +35,7 @@ async fn main() -> Result<()> {
     
     // initialize session controller
     let mc = Arc::new(SessionController::new().await?);
+    mc.create_session().await?;
     
     // joining routes 
     let cors = CorsLayer::new()

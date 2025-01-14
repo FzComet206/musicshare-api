@@ -20,27 +20,99 @@ use axum::routing::{
 };
 use std::sync::Arc;
 use serde_json::{json, Value};
-use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+use webrtc::ice_transport::ice_candidate::{
+    RTCIceCandidateInit,
+    RTCIceCandidate,
+};
 
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
-        .route("/session", post(create_session))
-        .route("/session", get(join_session))
+        .route("/get_offer", get(get_offer))
         .route("/set_answer", post(set_answer))
+        .route("/get_ice", get(get_ice))
+        .route("/set_ice", post(add_ice))
         .route("/broadcast", get(broadcast))
-        .route("/add_ice_candidate", post(add_ice_candidate))
         .with_state(mc)
 }
 
-#[derive(Debug, Deserialize)]
-struct SessionParams {
-    id: u64,
+async fn get_offer(
+    State(mc): State<Arc<SessionController>>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - join_session", "Handler");
+
+    let session = mc.get_session(0).await?;
+    let offer = session.get_offer().await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Session joined",
+        "offer": offer,
+    })))
 }
 
-async fn play() -> Result<Json<()>> {
-    // right now just play the rtc connection of first session in the list
-    Ok(Json(()))
+async fn set_answer(
+    // get request body
+    State(mc): State<Arc<SessionController>>,
+    Json(body): Json<SDPAnswerRequest>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - set_answer", "Handler");
+
+    let session = mc.get_session(0).await?;
+    session.set_answer(body.sdp).await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Session joined",
+    })))
 }
+
+async fn get_ice(
+    State(mc): State<Arc<SessionController>>,
+) -> Result<Json<Vec<RTCIceCandidate>>> {
+    println!("->> {:<12} - get_ice", "Handler");
+
+    let session = mc.get_session(0).await?;
+    session.gathering_state.notified().await;
+    let candidates = session.ice_candidates.lock().await.clone();
+    println!("Sent ice");
+
+    Ok(Json(candidates))
+}
+
+async fn add_ice(
+    State(mc): State<Arc<SessionController>>,
+    Json(body): Json<ICECandidateRequest>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - add_ice_candidate", "Handler");
+
+    let session = mc.get_session(0).await?;
+
+    let candidate = RTCIceCandidateInit {
+        candidate: body.candidate,
+        ..Default::default()
+    };
+
+    
+    session.add_ice(
+        candidate
+    ).await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "ice added",
+    })))
+}
+
+
+
+
+
+
+
+
+
+
+
 
 async fn create_session(
     State(mc): State<Arc<SessionController>>,
@@ -55,22 +127,23 @@ async fn create_session(
     })))
 }
 
-async fn join_session(
+async fn broadcast(
+    // get request body
     State(mc): State<Arc<SessionController>>,
 ) -> Result<Json<Value>> {
-    println!("->> {:<12} - join_session", "Handler");
+    println!("->> {:<12} - broadcast", "Handler");
 
-    // get first element from mc.sessions
-    let session = mc.get_session(0).await?;
-
-    // let offer = session.connect().await.unwrap();
-    let offer = session.get_sdp_offer().await.unwrap();
+    let mut session = mc.get_session(0).await?;
 
     Ok(Json(json!({
         "status": "ok",
-        "message": "Session joined",
-        "offer": offer,
+        "message": "Broadcasting",
     })))
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionParams {
+    id: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,66 +157,4 @@ struct ICECandidateRequest{
     sdp_mid: Option<String>,
     sdp_mline_index: Option<u16>,
     username_fragment: Option<String>,
-}
-
-async fn set_answer(
-    // get request body
-    State(mc): State<Arc<SessionController>>,
-    Json(body): Json<SDPAnswerRequest>,
-) -> Result<Json<Value>> {
-    println!("->> {:<12} - set_answer", "Handler");
-
-    // get first element from mc.sessions
-    let session = mc.get_session(0).await?;
-    session.set_sdp_answer(body.sdp).await.unwrap();
-
-    Ok(Json(json!({
-        "status": "ok",
-        "message": "Session joined",
-    })))
-}
-
-async fn add_ice_candidate(
-    // get request body
-    State(mc): State<Arc<SessionController>>,
-    Json(body): Json<ICECandidateRequest>,
-) -> Result<Json<Value>> {
-    println!("->> {:<12} - add_ice_candidate", "Handler");
-
-    // get first element from mc.sessions
-    let session = mc.get_session(0).await?;
-
-    session.add_ice_candidate(
-        RTCIceCandidateInit {
-            candidate: body.candidate,
-            sdp_mid: body.sdp_mid,
-            sdp_mline_index: body.sdp_mline_index,
-            username_fragment: body.username_fragment,
-        }
-    ).await?;
-
-    Ok(Json(json!({
-        "status": "ok",
-        "message": "ice added",
-    })))
-}
-
-async fn broadcast(
-    // get request body
-    State(mc): State<Arc<SessionController>>,
-) -> Result<Json<Value>> {
-    println!("->> {:<12} - broadcast", "Handler");
-
-    // get first element from mc.sessions
-    let mut session = mc.get_session(0).await?;
-
-
-    // broadcasting function blocks until it is done, and works
-    // session.broadcaster.add_audio_track("audio/opus").await.unwrap();
-    // println!("audio track: {:?}", session.broadcaster.audio_track);
-
-    Ok(Json(json!({
-        "status": "ok",
-        "message": "Broadcasting",
-    })))
 }
