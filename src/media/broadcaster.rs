@@ -67,14 +67,14 @@ impl Broadcaster {
         let mut file = tokio::fs::File::open(file_path).await.unwrap();
         
         // Buffer to read chunks of data
-        let samples_per_channel = 960; // 20ms of audio at 48kHz
+        let samples_per_channel = 265; // 20ms of audio at 48kHz
         let channels = 2; // Stereo
         let bytes_per_sample = 2; // 16-bit PCM
         let frame_size = samples_per_channel * channels * bytes_per_sample;
         let mut buffer = vec![0; frame_size];
 
         // let mut buffer = [0u8; frame_size]; // Adjust size based on codec requirements
-        let mut ticker = interval(Duration::from_millis(20)); // Example 20ms interval
+        let mut ticker = interval(Duration::from_millis(5)); // Example 20ms interval
 
         while let Ok(bytes_read) = file.read(&mut buffer).await {
             println!("Bytes read: {}", bytes_read);
@@ -86,21 +86,17 @@ impl Broadcaster {
             if let Some(track) = &self.audio_track {
                 ticker.tick().await; // Wait for the next interval
 
+                // print out the buffer
                 // Send the audio sample to the track
                 track
                 .sample_writer()
-                .with_audio_level(
-                    AudioLevelExtension {
-                        level: 10,
-                        voice: true,
-                    }
-                )
                 .write_sample(&Sample {
                     data: Bytes::copy_from_slice(&buffer[..bytes_read]), // Convert to Bytes
                     // data: Bytes::from_static(&[0;1024]),
-                    duration: Duration::from_millis(20), // Example duration
+                    duration: Duration::from_millis(5), // Example duration
                     ..Default::default()
                 }).await?;
+
 
             } else {
                 return Err(Error::new("No audio track available for broadcasting".to_string()));

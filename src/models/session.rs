@@ -165,8 +165,6 @@ impl SessionController{
 
         session.broadcaster.add_audio_track("audio/opus", session.peer_connection.clone()).await.unwrap();
         // session.broadcaster.broadcast_audio_from_file("short.ogg");
-        session.broadcaster.broadcast_audio_from_file("output2.ogg");
-
 
         println!("session created");
 

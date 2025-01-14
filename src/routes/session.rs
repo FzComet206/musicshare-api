@@ -103,17 +103,6 @@ async fn add_ice(
     })))
 }
 
-
-
-
-
-
-
-
-
-
-
-
 async fn create_session(
     State(mc): State<Arc<SessionController>>,
 ) -> Result<Json<Value>> {
