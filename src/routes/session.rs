@@ -124,7 +124,7 @@ async fn broadcast(
 
     let mut session = mc.get_session(0).await?;
 
-    session.broadcaster.broadcast_audio_from_file("output2.ogg").await?;
+    session.broadcaster.broadcast_audio_from_file("output.ogg").await?;
 
     Ok(Json(json!({
         "status": "ok",

@@ -54,7 +54,13 @@ impl Broadcaster {
             "broadcaster".to_owned(),
         ));
 
-        peer_connection.add_track(track.clone()).await?;
+        let rtp_sender = peer_connection.add_track(track.clone()).await?;
+
+        tokio::spawn(async move {
+            let mut rtcp_buf = vec![0u8; 1500];
+            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            Result::<()>::Ok(())
+        });
         // get self.peer connection's track
 
         self.audio_track = Some(track);
@@ -64,6 +70,7 @@ impl Broadcaster {
 
 
     pub async fn broadcast_audio_from_file(&self, file_path: &str) -> Result<()> {
+
 
         let file_name = file_path.to_owned();
         let audio_track = self.audio_track.clone().unwrap();
@@ -82,6 +89,7 @@ impl Broadcaster {
                 let sample_count = page_header.granule_position - last_granule;
                 last_granule = page_header.granule_position;
                 let sample_duration = Duration::from_millis((sample_count * 1000) / 48000);
+                println!("Sample duration: {:?}", sample_duration);
 
                 audio_track
                     .write_sample(&Sample {
