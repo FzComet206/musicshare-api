@@ -1,5 +1,7 @@
-use webrtc::api::media_engine::MediaEngine;
-use webrtc::api::media_engine::MIME_TYPE_VP8;
+use webrtc::api::media_engine::{
+    MediaEngine,
+    MIME_TYPE_OPUS,
+};
 use webrtc::api::APIBuilder;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
@@ -12,12 +14,18 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::sdp::sdp_type::RTCSdpType;
 
 use std::time::Duration;
-use webrtc::media::Sample;
-use tokio::{fs::File, io::AsyncReadExt, time::interval};
+use std::io::BufReader;
 use axum::body::Bytes;
 use tokio::sync::Mutex;
 use serde::Serialize;
 use webrtc::rtp::extension::audio_level_extension::AudioLevelExtension;
+use webrtc::media::{
+    Sample,
+    io::ogg_reader::OggReader,
+};
+use std::fs::File;
+
+const OGG_PAGE_DURATION: Duration = Duration::from_millis(20);
 
 
 #[derive(Clone, Debug)]
@@ -36,16 +44,14 @@ impl Broadcaster {
         })
     }
 
-    pub async fn add_audio_track(&mut self, codec: &str, peer_connection: Arc<RTCPeerConnection>) -> Result<()> {
+    pub async fn add_audio_track(&mut self, peer_connection: Arc<RTCPeerConnection>) -> Result<()> {
         let track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
-                mime_type: codec.to_string(),
-                clock_rate: 48000,
-                channels: 2,
+                mime_type: MIME_TYPE_OPUS.to_owned(),
                 ..Default::default()
             },
-            "audio".to_string(),
-            "broadcaster".to_string(),
+            "audio".to_owned(),
+            "broadcaster".to_owned(),
         ));
 
         peer_connection.add_track(track.clone()).await?;
@@ -59,50 +65,35 @@ impl Broadcaster {
 
     pub async fn broadcast_audio_from_file(&self, file_path: &str) -> Result<()> {
 
-        // Open the file asynchronously
-        // let mut file = File::open(file_path).await.map_err(|e| {
-            // Error::new(format!("Failed to open file {}: {}", file_path, e))
-        // })?;
+        let file_name = file_path.to_owned();
+        let audio_track = self.audio_track.clone().unwrap();
 
-        let mut file = tokio::fs::File::open(file_path).await.unwrap();
-        
-        // Buffer to read chunks of data
-        let samples_per_channel = 265; // 20ms of audio at 48kHz
-        let channels = 2; // Stereo
-        let bytes_per_sample = 2; // 16-bit PCM
-        let frame_size = samples_per_channel * channels * bytes_per_sample;
-        let mut buffer = vec![0; frame_size];
+        println!("Broadcasting audio from file: {}", file_name);
+        tokio::spawn(async move {
+            let file = File::open(file_name).unwrap();
+            let reader = BufReader::new(file);
+            let (mut ogg, _) = OggReader::new(reader, true).unwrap();
+            
+            let mut ticker = tokio::time::interval(OGG_PAGE_DURATION);
 
-        // let mut buffer = [0u8; frame_size]; // Adjust size based on codec requirements
-        let mut ticker = interval(Duration::from_millis(5)); // Example 20ms interval
+            let mut last_granule: u64 = 0;
+            while let Ok((page_data, page_header)) = ogg.parse_next_page() {
 
-        while let Ok(bytes_read) = file.read(&mut buffer).await {
-            println!("Bytes read: {}", bytes_read);
-            if bytes_read == 0 {
-                break; // End of file
+                let sample_count = page_header.granule_position - last_granule;
+                last_granule = page_header.granule_position;
+                let sample_duration = Duration::from_millis((sample_count * 1000) / 48000);
+
+                audio_track
+                    .write_sample(&Sample {
+                        data: page_data.freeze(),
+                        duration: sample_duration,
+                        ..Default::default()
+                    }).await;
+
+                let _ = ticker.tick().await;
+
             }
-
-            // print bytes_read
-            if let Some(track) = &self.audio_track {
-                ticker.tick().await; // Wait for the next interval
-
-                // print out the buffer
-                // Send the audio sample to the track
-                track
-                .sample_writer()
-                .write_sample(&Sample {
-                    data: Bytes::copy_from_slice(&buffer[..bytes_read]), // Convert to Bytes
-                    // data: Bytes::from_static(&[0;1024]),
-                    duration: Duration::from_millis(5), // Example duration
-                    ..Default::default()
-                }).await?;
-
-
-            } else {
-                return Err(Error::new("No audio track available for broadcasting".to_string()));
-            }
-        }
-
+        });
         Ok(())
     }
 

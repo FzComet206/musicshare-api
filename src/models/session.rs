@@ -162,9 +162,8 @@ impl SessionController{
 
         let id = sessions.len() as u64;
         let mut session = Session::new().await?;
+        session.broadcaster.add_audio_track(session.peer_connection.clone()).await.unwrap();
 
-        session.broadcaster.add_audio_track("audio/opus", session.peer_connection.clone()).await.unwrap();
-        // session.broadcaster.broadcast_audio_from_file("short.ogg");
 
         println!("session created");
 
