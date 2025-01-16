@@ -52,13 +52,13 @@ impl Session {
 
     pub async fn create_peer(& mut self) -> Result<(String)> {
 
-        println!("->> {:<12} - create_peer", "Session");
-
         let mut peer_connections = self.peer_connections.lock().await;
         let mut pc = PeerConnection::new(self.broadcaster.get_track().await.unwrap()).await;
 
         // uuid for identification
         let uuid = pc.uuid.clone();
+
+        println!("->> {:<12} - {} - create_peer", "Session", uuid);
 
         peer_connections.push(pc);
         Ok(uuid)
@@ -67,10 +67,10 @@ impl Session {
     // add uuid for identification
     pub async fn get_offer(&self, peerid: String) -> Result<String> {
 
-        println!("->> {:<12} - get_sdp_offer", "Session");
+        println!("->> {:<12} - {} - get_sdp_offer", "Session", peerid);
 
         let mut peer_connections = self.peer_connections.lock().await;
-        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
+        match peer_connections.iter_mut().find(|pc| pc.uuid == peerid) {
             Some(pc) => {
                 let offer = pc.get_offer().await?;
                 Ok(offer)
@@ -82,7 +82,7 @@ impl Session {
 
     pub async fn set_answer(&self, sdp: String, peerid: String) -> Result<()> {
 
-        println!("->> {:<12} - set_sdp_answer", "Session");
+        println!("->> {:<12} - {} - set_answer", "Session", peerid);
         let mut peer_connections = self.peer_connections.lock().await;
         match peer_connections.iter().find(|pc| pc.uuid == peerid) {
             Some(pc) => {
@@ -95,7 +95,7 @@ impl Session {
 
     pub async fn get_ice(&self, peerid: String) -> Result<Vec<RTCIceCandidate>> {
 
-        println!("->> {:<12} - get_ice", "Session");
+        println!("->> {:<12} - {} - get_ice", "Session", peerid);
 
         let mut peer_connections = self.peer_connections.lock().await;
         match peer_connections.iter().find(|pc| pc.uuid == peerid) {
@@ -109,8 +109,7 @@ impl Session {
 
     pub async fn add_ice(&self, candidate: RTCIceCandidateInit, peerid: String) -> Result<()> {
 
-        println!("->> {:<12} - set_ice", "Session");
-
+        println!("->> {:<12} - {} - add_ice", "Session", peerid);
         let mut peer_connections = self.peer_connections.lock().await;
         match peer_connections.iter().find(|pc| pc.uuid == peerid) {
             Some(pc) => {
@@ -119,6 +118,17 @@ impl Session {
             },
             None => Err(Error::PeerConnectionNotFound { peerid }),
         }
+    }
+
+    pub async fn get_peers(&self) -> Result<Vec<String>> {
+        let peer_connections = self.peer_connections.lock().await;
+
+        let mut peers = Vec::new();
+        for pc in peer_connections.iter() {
+            let active = pc.active.lock().await;
+            peers.push(format!("uuid: {} -- active: {}", pc.uuid, *active));
+        }
+        Ok(peers)
     }
 }
 
@@ -145,9 +155,6 @@ impl SessionController{
         let id = sessions.len() as u64;
         let mut session = Session::new().await?;
 
-
-        println!("session created");
-
         sessions.push(Some(session.clone()));
 
         Ok(session)
@@ -157,6 +164,11 @@ impl SessionController{
         let sessions = self.sessions.lock().await;
         let session = sessions.get(id as usize).and_then(|f| f.clone());
         session.ok_or(Error::SessionNotFound { id })
+    }
+
+    pub async fn get_sessions(&self) -> Result<Vec<Session>> {
+        let sessions = self.sessions.lock().await;
+        Ok(sessions.iter().filter_map(|s| s.clone()).collect())
     }
 }
 

@@ -28,7 +28,6 @@ mod utils;
 #[tokio::main]
 async fn main() -> Result<()> {
     
-
     // initialize gstreamer
     // Convearter::init();
     // Converter::convert_to_opus("test.mp3", "output.ogg");
@@ -53,6 +52,8 @@ async fn main() -> Result<()> {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("->> Server listening on port 3000");
+    println!("");
+    println!("");
 
     axum::Server::bind(&addr)
         .serve(routes_hello.into_make_service())

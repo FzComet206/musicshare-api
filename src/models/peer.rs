@@ -28,6 +28,7 @@ pub struct PeerConnection{
     pub peer_connection: Arc<RTCPeerConnection>,
     pub ice_candidates: Arc<Mutex<Vec<RTCIceCandidate>>>,
     pub gathering_state: Arc<Notify>,
+    pub active: Arc<Mutex<bool>>,
 }
 
 impl PeerConnection {
@@ -52,10 +53,6 @@ impl PeerConnection {
 
         // Create a new RTCPeerConnection
         let peer_connection = api.new_peer_connection(config).await.unwrap();
-        peer_connection.on_peer_connection_state_change(Box::new(|state| {
-            println!("Peer Connection State Change: {:?}", state);
-            Box::pin(async {})
-        }));
 
         let rtp_sender = peer_connection.add_track(track.clone()).await.unwrap();
 
@@ -71,52 +68,71 @@ impl PeerConnection {
             peer_connection: Arc::new(peer_connection),
             ice_candidates: Arc::new(Mutex::new(Vec::new())),
             gathering_state: Arc::new(Notify::new()),
+            active: Arc::new(Mutex::new(true)),
         }
     }
 
 
-    pub async fn get_offer(&self) -> Result<String> {
+    pub async fn get_offer(& mut self) -> Result<String> {
 
-        println!("->> {:<12} - get_sdp_offer", "PeerConnection");
+        let pc = &mut self.peer_connection;
 
-        let offer = self.peer_connection.create_offer(None).await.unwrap();
-        self.peer_connection.set_local_description(offer).await?;
+        // Use an Arc<Mutex> for `self.active` to make it thread-safe and `'static`
+        let active = Arc::clone(&self.active); // Assume self.active is Arc<Mutex<bool>>
 
-        // gather ice candidates
-        self.peer_connection.on_ice_candidate(Box::new({
+        pc.on_peer_connection_state_change(Box::new(move |state| {
+            println!(
+                "->> {:<12} Peer Connection State Change: {:?}",
+                "PeerConnection", state
+            );
 
-            /// below variables will be owned by the closure
+            let active = Arc::clone(&active);
+
+            Box::pin(async move {
+                if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected {
+                    // Set active to false
+                    let mut active = active.lock().await;
+                    *active = false;
+                }
+            })
+        }));
+
+        let offer = pc.create_offer(None).await?;
+        pc.set_local_description(offer.clone()).await?;
+
+        // Gather ICE candidates
+        pc.on_ice_candidate(Box::new({
             let ice_candidates = Arc::clone(&self.ice_candidates);
             let notify = Arc::clone(&self.gathering_state);
-            
-            move |candidate| {
 
+            move |candidate| {
                 let ice_candidates = Arc::clone(&ice_candidates);
                 let notify = Arc::clone(&notify);
 
                 Box::pin(async move {
                     if let Some(candidate) = candidate {
-                        println!("New ICE Candidate: {:?}", candidate.address);
                         let mut candidates = ice_candidates.lock().await;
                         candidates.push(candidate);
                     } else {
+                        // Notify waiters after gathering is complete
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         notify.notify_waiters();
-                        println!("ICE Candidate gathering complete");
                     }
                 })
             }
         }));
 
-
-        let mut local_description = self.peer_connection.local_description().await.unwrap();
-
-        Ok(local_description.sdp)
+        // Wait for local description and return SDP
+        if let Some(local_description) = pc.local_description().await {
+            Ok(local_description.sdp)
+        } else {
+            Err(Error::LocalDescriptionMissing)
+        }
     }
+
 
     /// Sets an SDP answer
     pub async fn set_answer(&self, sdp: String) -> Result<()> {
-        println!("->> {:<12} - set_sdp_answer", "Broadcaster");
         let remote_desc = RTCSessionDescription::answer(sdp)?;
         self.peer_connection.set_remote_description(remote_desc).await?;
 
@@ -124,18 +140,13 @@ impl PeerConnection {
     }
 
     pub async fn get_ice(&self) -> Result<Vec<RTCIceCandidate>> {
-        println!("->> {:<12} - get_ice", "Broadcaster");
         self.gathering_state.notified().await;
         let candidates = self.ice_candidates.lock().await.clone();
-        println!("Sent ice");
 
         Ok(candidates)
     }
 
-
     pub async fn add_ice(&self, candidate: RTCIceCandidateInit)-> Result<()> {
-        println!("->> {:<12} - add_ice_candidate", "Broadcaster");
-        println!("Adding ICE candidate: {:?}", candidate.candidate);
         self.peer_connection.add_ice_candidate(candidate).await?;
         Ok(())
     }

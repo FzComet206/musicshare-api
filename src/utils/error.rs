@@ -9,6 +9,7 @@ pub enum Error {
     SessionNotFound { id: u64 },
     WebRTCErr { source: String },
     PeerConnectionNotFound { peerid: String },
+    LocalDescriptionMissing,
 }
 
 impl IntoResponse for Error {

@@ -57,7 +57,36 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/get_ice", post(get_ice))
         .route("/set_ice", post(add_ice))
         .route("/broadcast", get(broadcast))
+        .route("/state", get(server_state))
         .with_state(mc)
+}
+
+async fn server_state(
+    State(mc): State<Arc<SessionController>>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - server_state", "Handler");
+
+    let sessions = mc.get_sessions().await?;
+    let mut session_list = Vec::new();
+    for session in sessions {
+        let peers = session.get_peers().await?;
+        let mut peer_list = Vec::new();
+        for peer in peers {
+            peer_list.push(json!({
+                "peerid": peer,
+            }));
+        }
+        session_list.push(json!({
+            "session": session.uuid,
+            "peers": peer_list,
+        }));
+    }
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Server state",
+        "sessions": session_list,
+    })))
 }
 
 async fn get_offer(
@@ -107,7 +136,6 @@ async fn get_ice(
     let session = mc.get_session(0).await?;
 
     let candidates = session.get_ice(body.peerid).await?.clone();
-    println!("Sent ice");
 
     Ok(Json(candidates))
 }

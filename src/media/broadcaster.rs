@@ -65,7 +65,6 @@ impl Broadcaster {
         let file_name = file_path.to_owned();
         let audio_track = self.audio_track.clone();
 
-        println!("Broadcasting audio from file: {}", file_name);
         tokio::spawn(async move {
             let file = File::open(file_name).unwrap();
             let reader = BufReader::new(file);
