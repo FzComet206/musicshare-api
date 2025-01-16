@@ -25,11 +25,36 @@ use webrtc::ice_transport::ice_candidate::{
     RTCIceCandidate,
 };
 
+#[derive(Debug, Deserialize)]
+struct SessionParams {
+    id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SDPAnswerRequest {
+    sdp: String,
+    peerid: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ICECandidateRequest {
+    candidate: String,
+    sdp_mid: Option<String>,
+    sdp_mline_index: Option<u16>,
+    username_fragment: Option<String>,
+    peerid: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetIceRequest {
+    peerid: String,
+}
+
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
         .route("/get_offer", get(get_offer))
         .route("/set_answer", post(set_answer))
-        .route("/get_ice", get(get_ice))
+        .route("/get_ice", post(get_ice))
         .route("/set_ice", post(add_ice))
         .route("/broadcast", get(broadcast))
         .with_state(mc)
@@ -40,13 +65,19 @@ async fn get_offer(
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - join_session", "Handler");
 
-    let session = mc.get_session(0).await?;
-    let offer = session.get_offer().await?;
+    // in final impl, this should have request payload of session uuid
+
+    let mut session = mc.get_session(0).await?;
+    // let offer = session.get_offer("hi".to_string()).await?;
+    let mut uuid = session.create_peer().await?;
+    let id = uuid.clone();
+    let offer = session.get_offer(uuid).await?;
 
     Ok(Json(json!({
         "status": "ok",
         "message": "Session joined",
         "offer": offer,
+        "peerid": id,
     })))
 }
 
@@ -58,7 +89,8 @@ async fn set_answer(
     println!("->> {:<12} - set_answer", "Handler");
 
     let session = mc.get_session(0).await?;
-    session.set_answer(body.sdp).await?;
+
+    session.set_answer(body.sdp, body.peerid).await?;
 
     Ok(Json(json!({
         "status": "ok",
@@ -68,12 +100,13 @@ async fn set_answer(
 
 async fn get_ice(
     State(mc): State<Arc<SessionController>>,
+    Json(body): Json<GetIceRequest>,
 ) -> Result<Json<Vec<RTCIceCandidate>>> {
     println!("->> {:<12} - get_ice", "Handler");
 
     let session = mc.get_session(0).await?;
-    session.gathering_state.notified().await;
-    let candidates = session.ice_candidates.lock().await.clone();
+
+    let candidates = session.get_ice(body.peerid).await?.clone();
     println!("Sent ice");
 
     Ok(Json(candidates))
@@ -94,7 +127,8 @@ async fn add_ice(
 
     
     session.add_ice(
-        candidate
+        candidate,
+        body.peerid,
     ).await?;
 
     Ok(Json(json!({
@@ -130,22 +164,4 @@ async fn broadcast(
         "status": "ok",
         "message": "Broadcasting",
     })))
-}
-
-#[derive(Debug, Deserialize)]
-struct SessionParams {
-    id: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct SDPAnswerRequest {
-    sdp: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ICECandidateRequest{
-    candidate: String,
-    sdp_mid: Option<String>,
-    sdp_mline_index: Option<u16>,
-    username_fragment: Option<String>,
 }

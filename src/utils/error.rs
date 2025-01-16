@@ -8,6 +8,7 @@ pub enum Error {
     SessionDeleteFailIdNotFound { id: u64 },
     SessionNotFound { id: u64 },
     WebRTCErr { source: String },
+    PeerConnectionNotFound { peerid: String },
 }
 
 impl IntoResponse for Error {

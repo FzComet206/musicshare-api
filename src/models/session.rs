@@ -1,9 +1,12 @@
 use crate::utils::error::{Error, Result};
+use crate::media::broadcaster::Broadcaster;
+use crate::models::peer::PeerConnection;
+
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
-use crate::media::broadcaster::Broadcaster;
+
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::media_engine::MIME_TYPE_VP8;
 use webrtc::api::APIBuilder;
@@ -22,123 +25,103 @@ use webrtc::ice_transport::ice_candidate::{
 use webrtc::ice_transport::ice_gatherer_state::RTCIceGathererState;
 
 
-
 #[derive(Clone, Debug)]
 pub struct Session {
     pub id: u64,
     pub uuid: String,
-    pub peer_connection: Arc<RTCPeerConnection>,
+    pub peer_connections: Arc<Mutex<Vec<PeerConnection>>>,
     pub broadcaster: Broadcaster,
-    pub ice_candidates: Arc<Mutex<Vec<RTCIceCandidate>>>,
-    pub gathering_state: Arc<Notify>,
+    pub queue: Arc<Mutex<Vec<String>>>,
 } 
 
 impl Session {
 
     pub async fn new() -> Result<Self> {
 
-        let mut m = MediaEngine::default();
-        m.register_default_codecs();
-
-        // Create a new API with the MediaEngine
-        let api = APIBuilder::new().with_media_engine(m).build();
-        // Define ICE servers
-        let config = RTCConfiguration {
-            ice_servers: vec![RTCIceServer {
-                // urls: vec!["stun:stun.l.google.com:19302".to_string()],
-                urls: vec![],
-                ..Default::default()
-            }],
-            // ice_transport_policy: "all".to_string(),
-            ..Default::default()
-        };
-
-
-
-        // Create a new RTCPeerConnection
-        let peer_connection = api.new_peer_connection(config).await?;
-        peer_connection.on_peer_connection_state_change(Box::new(|state| {
-            println!("Peer Connection State Change: {:?}", state);
-            Box::pin(async {})
-        }));
+        let broadcaster = Broadcaster::new().await?;
 
         Ok(Self {
             id: 0,
             uuid: uuid::Uuid::new_v4().to_string(),
-            peer_connection: Arc::new(peer_connection),
-            broadcaster: Broadcaster::new().await.unwrap(),
-            ice_candidates: Arc::new(Mutex::new(Vec::new())),
-            gathering_state: Arc::new(Notify::new()),
+            peer_connections: Arc::new(Mutex::new(Vec::new())),
+            broadcaster: broadcaster,
+            queue: Arc::new(Mutex::new(Vec::new())),
         })
     }
-    
-    pub async fn get_offer(&self) -> Result<String> {
-        println!("->> {:<12} - get_sdp_offer", "Broadcaster");
-
-        let offer = self.peer_connection.create_offer(None).await.unwrap();
-        self.peer_connection.set_local_description(offer).await?;
-
-        // gather ice candidates
-        self.peer_connection.on_ice_candidate(Box::new({
-
-            /// below variables will be owned by the closure
-            let ice_candidates = Arc::clone(&self.ice_candidates);
-            let notify = Arc::clone(&self.gathering_state);
-            
-            move |candidate| {
-
-                let ice_candidates = Arc::clone(&ice_candidates);
-                let notify = Arc::clone(&notify);
-
-                Box::pin(async move {
-                    if let Some(candidate) = candidate {
-                        println!("New ICE Candidate: {:?}", candidate.address);
-                        let mut candidates = ice_candidates.lock().await;
-                        candidates.push(candidate);
-                    } else {
-
-                        // wait for 1 seconds 
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        notify.notify_waiters();
-                        println!("ICE Candidate gathering complete");
-                    }
-                })
-            }
-        }));
 
 
-        let mut local_description = self.peer_connection.local_description().await.unwrap();
+    pub async fn create_peer(& mut self) -> Result<(String)> {
 
-        Ok(local_description.sdp)
+        println!("->> {:<12} - create_peer", "Session");
+
+        let mut peer_connections = self.peer_connections.lock().await;
+        let mut pc = PeerConnection::new(self.broadcaster.get_track().await.unwrap()).await;
+
+        // uuid for identification
+        let uuid = pc.uuid.clone();
+
+        peer_connections.push(pc);
+        Ok(uuid)
     }
 
-    /// Sets an SDP answer
-    pub async fn set_answer(&self, sdp: String) -> Result<()> {
-        println!("->> {:<12} - set_sdp_answer", "Broadcaster");
-        let remote_desc = RTCSessionDescription::answer(sdp)?;
-        self.peer_connection.set_remote_description(remote_desc).await?;
+    // add uuid for identification
+    pub async fn get_offer(&self, peerid: String) -> Result<String> {
 
-        Ok(())
+        println!("->> {:<12} - get_sdp_offer", "Session");
+
+        let mut peer_connections = self.peer_connections.lock().await;
+        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
+            Some(pc) => {
+                let offer = pc.get_offer().await?;
+                Ok(offer)
+            },
+            None => Err(Error::PeerConnectionNotFound { peerid }),
+        }
+
     }
 
+    pub async fn set_answer(&self, sdp: String, peerid: String) -> Result<()> {
 
-    pub async fn add_ice(&self, candidate: RTCIceCandidateInit)-> Result<()> {
-        println!("->> {:<12} - add_ice_candidate", "Broadcaster");
-        println!("Adding ICE candidate: {:?}", candidate.candidate);
-        self.peer_connection.add_ice_candidate(candidate).await?;
-        Ok(())
+        println!("->> {:<12} - set_sdp_answer", "Session");
+        let mut peer_connections = self.peer_connections.lock().await;
+        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
+            Some(pc) => {
+                let offer = pc.set_answer(sdp).await?;
+                Ok(())
+            },
+            None => Err(Error::PeerConnectionNotFound { peerid }),
+        }
     }
 
-    // pub async fn connect(&self) -> Result<String> {
+    pub async fn get_ice(&self, peerid: String) -> Result<Vec<RTCIceCandidate>> {
 
-        // // get sdp offer from broadcaster
-        // println!("->> {:<12} - connect", "Session");
-        // let sdp_offer = self.get_sdp_offer().await.unwrap();
+        println!("->> {:<12} - get_ice", "Session");
 
-        // Ok(sdp_offer)
-    // }
+        let mut peer_connections = self.peer_connections.lock().await;
+        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
+            Some(pc) => {
+                let offer = pc.get_ice().await?;
+                Ok(offer)
+            },
+            None => Err(Error::PeerConnectionNotFound { peerid }),
+        }
+    }
 
+    pub async fn add_ice(&self, candidate: RTCIceCandidateInit, peerid: String) -> Result<()> {
+
+        println!("->> {:<12} - set_ice", "Session");
+
+        let mut peer_connections = self.peer_connections.lock().await;
+        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
+            Some(pc) => {
+                let offer = pc.add_ice(candidate).await?;
+                Ok(())
+            },
+            None => Err(Error::PeerConnectionNotFound { peerid }),
+        }
+    }
 }
+
 
 #[derive(Clone, Debug)]
 pub struct SessionController{
@@ -159,10 +142,8 @@ impl SessionController{
         println!("->> {:<12} - create_session", "Controller");
 
         let mut sessions = self.sessions.lock().await;
-
         let id = sessions.len() as u64;
         let mut session = Session::new().await?;
-        session.broadcaster.add_audio_track(session.peer_connection.clone()).await.unwrap();
 
 
         println!("session created");

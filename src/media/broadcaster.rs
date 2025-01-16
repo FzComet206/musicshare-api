@@ -30,21 +30,14 @@ const OGG_PAGE_DURATION: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Debug)]
 pub struct Broadcaster {
-    pub audio_track: Option<Arc<TrackLocalStaticSample>>,
+    pub audio_track: Arc<TrackLocalStaticSample>,
     // pub is_broadcasting: Arc<Mutex<bool>>, 
 }
 
 impl Broadcaster {
     /// Initializes a new Broadcaster with a WebRTC PeerConnection
     pub async fn new() -> Result<Self> {
-        // Create a MediaEngine
-        Ok(Self {
-            audio_track: None,
-            // is_broadcasting: Arc::new(Mutex::new(false)),
-        })
-    }
 
-    pub async fn add_audio_track(&mut self, peer_connection: Arc<RTCPeerConnection>) -> Result<()> {
         let track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
                 mime_type: MIME_TYPE_OPUS.to_owned(),
@@ -54,26 +47,23 @@ impl Broadcaster {
             "broadcaster".to_owned(),
         ));
 
-        let rtp_sender = peer_connection.add_track(track.clone()).await?;
 
-        tokio::spawn(async move {
-            let mut rtcp_buf = vec![0u8; 1500];
-            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            Result::<()>::Ok(())
-        });
-        // get self.peer connection's track
+        Ok(Self {
+            audio_track: track,
+            // is_broadcasting: Arc::new(Mutex::new(false)),
+        })
+    }
 
-        self.audio_track = Some(track);
+    pub async fn get_track(&mut self) -> Result<(Arc<TrackLocalStaticSample>)> {
 
-        Ok(())
+        Ok(self.audio_track.clone())
     }
 
 
     pub async fn broadcast_audio_from_file(&self, file_path: &str) -> Result<()> {
 
-
         let file_name = file_path.to_owned();
-        let audio_track = self.audio_track.clone().unwrap();
+        let audio_track = self.audio_track.clone();
 
         println!("Broadcasting audio from file: {}", file_name);
         tokio::spawn(async move {
