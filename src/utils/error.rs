@@ -10,6 +10,9 @@ pub enum Error {
     WebRTCErr { source: String },
     PeerConnectionNotFound { peerid: String },
     LocalDescriptionMissing,
+    YtDlError { source: String },
+    AudioDownloadDirError { source: String },
+    FileTooLarge { size: u64, limit: u64 },
 }
 
 impl IntoResponse for Error {
@@ -24,6 +27,22 @@ impl From<webrtc::Error> for Error {
     fn from(err: webrtc::Error) -> Self {
         Error::WebRTCErr {
             source: format!("{:?}", err),
+        }
+    }
+}
+
+impl From<yt_dlp::error::Error> for Error {
+    fn from(err: yt_dlp::error::Error) -> Self {
+        Error::YtDlError {
+            source: format!("{:?}", err),
+        }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(_err: std::io::Error) -> Self {
+        Error::AudioDownloadDirError {
+            source: "Failed to create audio download directory".to_string(),
         }
     }
 }

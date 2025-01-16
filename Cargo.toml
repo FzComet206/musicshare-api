@@ -15,6 +15,7 @@ gstreamer-audio = "0.20"
 gstreamer-app = "0.20"
 uuid = { version = "1", features = ["v4"] }
 webrtc = "0.12"
+yt-dlp = "1.2.3"
 
 [dev-dependencies]
 anyhow = "1"

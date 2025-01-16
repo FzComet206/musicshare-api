@@ -11,7 +11,6 @@ use tower_http::services::ServeDir;
 use std::net::SocketAddr;
 
 use models::SessionController;
-use media::converter::Converter;
 use tower_http::cors::{Any, CorsLayer};
 use axum::http::Method;
 use std::sync::Arc;
@@ -23,15 +22,18 @@ mod routes;
 mod models;
 mod utils;
 // import error.rs module
+use crate::media::file_manager::FileManager;
 
 
 #[tokio::main]
 async fn main() -> Result<()> {
     
     // initialize gstreamer
-    // Convearter::init();
-    // Converter::convert_to_opus("test.mp3", "output.ogg");
-    
+    FileManager::download_audio(
+        "https://www.youtube.com/watch?v=6J0DzHkAzoM&list=PLUfMEH0ZCPwsjpJ2suag3YkTpy_BxO9fY",
+        "output"
+    ).await?;
+
     // initialize session controller
     let mc = Arc::new(SessionController::new().await?);
     mc.create_session().await?;
