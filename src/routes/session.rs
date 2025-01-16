@@ -152,7 +152,6 @@ async fn add_ice(
         candidate: body.candidate,
         ..Default::default()
     };
-
     
     session.add_ice(
         candidate,

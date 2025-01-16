@@ -27,8 +27,9 @@ pub struct PeerConnection{
     pub uuid: String,
     pub peer_connection: Arc<RTCPeerConnection>,
     pub ice_candidates: Arc<Mutex<Vec<RTCIceCandidate>>>,
-    pub gathering_state: Arc<Notify>,
     pub active: Arc<Mutex<bool>>,
+    pub gathering_state: Arc<Notify>,
+    pub is_gathering_complete: Arc<Mutex<bool>>,
 }
 
 impl PeerConnection {
@@ -67,8 +68,9 @@ impl PeerConnection {
             uuid: uuid::Uuid::new_v4().to_string(),
             peer_connection: Arc::new(peer_connection),
             ice_candidates: Arc::new(Mutex::new(Vec::new())),
-            gathering_state: Arc::new(Notify::new()),
             active: Arc::new(Mutex::new(true)),
+            gathering_state: Arc::new(Notify::new()),
+            is_gathering_complete: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -104,10 +106,12 @@ impl PeerConnection {
         pc.on_ice_candidate(Box::new({
             let ice_candidates = Arc::clone(&self.ice_candidates);
             let notify = Arc::clone(&self.gathering_state);
+            let ice_gatherer_state = Arc::clone(&self.is_gathering_complete);
 
             move |candidate| {
                 let ice_candidates = Arc::clone(&ice_candidates);
                 let notify = Arc::clone(&notify);
+                let ice_gatherer_state = Arc::clone(&ice_gatherer_state);
 
                 Box::pin(async move {
                     if let Some(candidate) = candidate {
@@ -115,7 +119,8 @@ impl PeerConnection {
                         candidates.push(candidate);
                     } else {
                         // Notify waiters after gathering is complete
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        let mut complete = ice_gatherer_state.lock().await;
+                        *complete = true;
                         notify.notify_waiters();
                     }
                 })
@@ -140,9 +145,19 @@ impl PeerConnection {
     }
 
     pub async fn get_ice(&self) -> Result<Vec<RTCIceCandidate>> {
-        self.gathering_state.notified().await;
-        let candidates = self.ice_candidates.lock().await.clone();
 
+        loop {
+
+            {
+                let complete = self.is_gathering_complete.lock().await;
+                if *complete {
+                    break;
+                }
+            }
+            self.gathering_state.notified().await;
+        }
+
+        let candidates = self.ice_candidates.lock().await.clone();
         Ok(candidates)
     }
 
