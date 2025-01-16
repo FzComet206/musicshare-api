@@ -24,12 +24,15 @@ use webrtc::ice_transport::ice_candidate::{
 };
 use webrtc::ice_transport::ice_gatherer_state::RTCIceGathererState;
 
+use std::collections::HashMap;
+
 
 #[derive(Clone, Debug)]
 pub struct Session {
     pub id: u64,
     pub uuid: String,
-    pub peer_connections: Arc<Mutex<Vec<PeerConnection>>>,
+    // pub peer_connections: Arc<Mutex<Vec<PeerConnection>>>,
+    pub peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     pub broadcaster: Broadcaster,
     pub queue: Arc<Mutex<Vec<String>>>,
 } 
@@ -43,7 +46,7 @@ impl Session {
         Ok(Self {
             id: 0,
             uuid: uuid::Uuid::new_v4().to_string(),
-            peer_connections: Arc::new(Mutex::new(Vec::new())),
+            peer_connections: Arc::new(Mutex::new(HashMap::new())),
             broadcaster: broadcaster,
             queue: Arc::new(Mutex::new(Vec::new())),
         })
@@ -60,7 +63,7 @@ impl Session {
 
         println!("->> {:<12} - {} - create_peer", "Session", uuid);
 
-        peer_connections.push(pc);
+        peer_connections.insert(uuid.clone(), pc);
         Ok(uuid)
     }
 
@@ -70,27 +73,17 @@ impl Session {
         println!("->> {:<12} - {} - get_sdp_offer", "Session", peerid);
 
         let mut peer_connections = self.peer_connections.lock().await;
-        match peer_connections.iter_mut().find(|pc| pc.uuid == peerid) {
-            Some(pc) => {
-                let offer = pc.get_offer().await?;
-                Ok(offer)
-            },
-            None => Err(Error::PeerConnectionNotFound { peerid }),
-        }
 
+        let offer = peer_connections.get_mut(&peerid).unwrap().get_offer().await?;
+        Ok(offer)
     }
 
     pub async fn set_answer(&self, sdp: String, peerid: String) -> Result<()> {
 
         println!("->> {:<12} - {} - set_answer", "Session", peerid);
         let mut peer_connections = self.peer_connections.lock().await;
-        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
-            Some(pc) => {
-                let offer = pc.set_answer(sdp).await?;
-                Ok(())
-            },
-            None => Err(Error::PeerConnectionNotFound { peerid }),
-        }
+        let pc = peer_connections.get_mut(&peerid).unwrap().set_answer(sdp).await?;
+        Ok(())
     }
 
     pub async fn get_ice(&self, peerid: String) -> Result<Vec<RTCIceCandidate>> {
@@ -98,35 +91,26 @@ impl Session {
         println!("->> {:<12} - {} - get_ice", "Session", peerid);
 
         let mut peer_connections = self.peer_connections.lock().await;
-        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
-            Some(pc) => {
-                let offer = pc.get_ice().await?;
-                Ok(offer)
-            },
-            None => Err(Error::PeerConnectionNotFound { peerid }),
-        }
+        let ice = peer_connections.get_mut(&peerid).unwrap().get_ice().await?;
+        Ok(ice)
     }
 
     pub async fn add_ice(&self, candidate: RTCIceCandidateInit, peerid: String) -> Result<()> {
 
         println!("->> {:<12} - {} - add_ice", "Session", peerid);
         let mut peer_connections = self.peer_connections.lock().await;
-        match peer_connections.iter().find(|pc| pc.uuid == peerid) {
-            Some(pc) => {
-                let offer = pc.add_ice(candidate).await?;
-                Ok(())
-            },
-            None => Err(Error::PeerConnectionNotFound { peerid }),
-        }
+        let ice = peer_connections.get_mut(&peerid).unwrap().add_ice(candidate).await?;
+        Ok(())
     }
 
     pub async fn get_peers(&self) -> Result<Vec<String>> {
         let peer_connections = self.peer_connections.lock().await;
 
         let mut peers = Vec::new();
-        for pc in peer_connections.iter() {
+
+        for (uuid, pc) in peer_connections.iter() {
             let active = pc.active.lock().await;
-            peers.push(format!("uuid: {} -- active: {}", pc.uuid, *active));
+            peers.push(format!("uuid: {} -- active: {}", uuid, *active));
         }
         Ok(peers)
     }

@@ -78,7 +78,7 @@ impl Broadcaster {
                 let sample_count = page_header.granule_position - last_granule;
                 last_granule = page_header.granule_position;
                 let sample_duration = Duration::from_millis((sample_count * 1000) / 48000);
-                println!("Sample duration: {:?}", sample_duration);
+                // println!("Sample duration: {:?}", sample_duration);
 
                 audio_track
                     .write_sample(&Sample {
