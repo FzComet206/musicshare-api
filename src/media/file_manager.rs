@@ -21,13 +21,15 @@ impl FileManager {
     }
 
     pub async fn run_pipeline(url: String) -> Result<()> {
-        // check if the url is a playlist with string manipulation
-        // Self::is_live(url.clone()).await?;
 
-        // determine if its playlist
-        // determine if its stream
+        let is_playlist = url.contains("playlist") || url.contains("list");
+        if is_playlist {
+            Self::download_playlist(url.clone()).await?;
+        } else {
+            Self::is_live(url.clone()).await?;
+            Self::download_audio(url.clone()).await?;
+        }
 
-        Self::download_playlist(url.clone()).await?;
         Ok(())
     }
 
@@ -54,7 +56,7 @@ impl FileManager {
                     .collect();
                 
                 // task pool size
-                let semaphore = Arc::new(Semaphore::new(4));
+                let semaphore = Arc::new(Semaphore::new(10));
                 let mut tasks = FuturesUnordered::new();
 
                 for url in urls {
@@ -64,9 +66,8 @@ impl FileManager {
                     tasks.push(task::spawn(async move{
 
                         let _permit = sem_clone.acquire().await.unwrap();
-
-                        println!("Downloading: {}", url);
-                        Self::download_audio(url.clone(), "./output").await;
+                        println!("Starting task: {}", url);
+                        Self::download_audio(url.clone()).await;
 
                     }));
                 }
@@ -92,8 +93,6 @@ impl FileManager {
             .output()
             .await?;
         
-        println!("checking");
-
         if !output.status.success() {
             return Err(Error::InvalidURL {url: url.to_string()});
         }
@@ -106,10 +105,10 @@ impl FileManager {
         Ok(())
     }
 
-
-    pub async fn download_audio(url: String, output_dir: &str) -> Result<()> {
+    pub async fn download_audio(url: String) -> Result<()> {
 
         FileManager::get_file_size(url.clone()).await?;
+        let output_dir = "./output";
         let converted_dir = "./converted";
 
         // Ensure the output directory exists
@@ -139,9 +138,14 @@ impl FileManager {
         
         if output.status.success() {
             println!("Audio downloaded successfully!");
+
+            // get audio title
+            // notify the user that the audio has been downloaded 
+
         } else {
             eprintln!("Failed to download audio. Status: {:?}", output.status);
         }
+
 
 
         let status = Command::new(FFMPEG_PATH)
@@ -156,6 +160,11 @@ impl FileManager {
             .arg(format!("{}/{}.ogg", converted_dir, uuid)) // Output file
             .status()
             .await?;
+
+    
+        // store audio title and uuid to database
+        // notify the user that the audio has been converted
+        // upload the ogg to s3, then delete both the mp3 and ogg files
 
         Ok(())
     }
