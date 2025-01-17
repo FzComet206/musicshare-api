@@ -10,30 +10,26 @@ pub enum Error {
     WebRTCErr { source: String },
     PeerConnectionNotFound { peerid: String },
     LocalDescriptionMissing,
-    YtDlError { source: String },
     AudioDownloadDirError { source: String },
     FileTooLarge { size: u64, limit: u64 },
+    InvalidURL { url: String },
+    LiveStreamNotSupported { url: String },
+    PlayListParseErr { msg: String },
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         println!("->> {:<12} - {self:?}", "INTO_RES");
 
-        (StatusCode::INTERNAL_SERVER_ERROR, "UNHANDLED_CLIENT_ERROR").into_response()
+        // return a response with the error code and message
+        // return the error type and message
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", self)).into_response()
     }
 }
 
 impl From<webrtc::Error> for Error {
     fn from(err: webrtc::Error) -> Self {
         Error::WebRTCErr {
-            source: format!("{:?}", err),
-        }
-    }
-}
-
-impl From<yt_dlp::error::Error> for Error {
-    fn from(err: yt_dlp::error::Error) -> Self {
-        Error::YtDlError {
             source: format!("{:?}", err),
         }
     }

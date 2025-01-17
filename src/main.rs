@@ -29,10 +29,10 @@ use crate::media::file_manager::FileManager;
 async fn main() -> Result<()> {
     
     // initialize gstreamer
-    FileManager::download_audio(
-        "https://www.youtube.com/watch?v=6J0DzHkAzoM&list=PLUfMEH0ZCPwsjpJ2suag3YkTpy_BxO9fY",
-        "output"
-    ).await?;
+    // FileManager::download_audio(
+        // "https://www.youtube.com/watch?v=6J0DzHkAzoM&list=PLUfMEH0ZCPwsjpJ2suag3YkTpy_BxO9fY",
+        // "output"
+    // ).await?;
 
     // initialize session controller
     let mc = Arc::new(SessionController::new().await?);

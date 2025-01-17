@@ -25,6 +25,8 @@ use webrtc::ice_transport::ice_candidate::{
     RTCIceCandidate,
 };
 
+use crate::media::file_manager::FileManager;
+
 #[derive(Debug, Deserialize)]
 struct SessionParams {
     id: u64,
@@ -50,6 +52,11 @@ struct GetIceRequest {
     peerid: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PlayTestRequest {
+    url: String,
+}
+
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
         .route("/get_offer", get(get_offer))
@@ -58,6 +65,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/set_ice", post(add_ice))
         .route("/broadcast", get(broadcast))
         .route("/state", get(server_state))
+        .route("/playtest", post(playtest))
         .with_state(mc)
 }
 
@@ -190,5 +198,18 @@ async fn broadcast(
     Ok(Json(json!({
         "status": "ok",
         "message": "Broadcasting",
+    })))
+}
+
+async fn playtest(
+    State(mc): State<Arc<SessionController>>,
+    Json(body): Json<PlayTestRequest>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - playtest", "Handler");
+    FileManager::run_pipeline(body.url).await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Playing test",
     })))
 }
