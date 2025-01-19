@@ -16,9 +16,11 @@
 use std::sync::Arc;
 use axum::Router;
 use axum::routing::post;
+use axum::extract::State;
 
 use crate::utils::error::{ Error, Result };
 use crate::models::SessionController;
+use crate::ctx::Ctx;
 
 
 pub fn routes(mc: Arc<SessionController>) -> Router {
@@ -27,7 +29,12 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .with_state(mc)
 }
 
-async fn test_auth() -> Result<()> {
+async fn test_auth(
+    State(mc): State<Arc<SessionController>>,
+    ctx: Ctx,
+) -> Result<()> {
+
     println!("test auth");
+    println!("id in route: {}", ctx.id());
     Ok(())
 }

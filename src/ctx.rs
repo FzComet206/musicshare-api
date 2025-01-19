@@ -1,18 +1,32 @@
 #[derive(Clone, Debug)]
 pub struct Ctx {
-	user_id: u64,
+	id: String,
+	name: String,
+	picture: String,
 }
 
 // Constructor.
 impl Ctx {
-	pub fn new(user_id: u64) -> Self {
-		Self { user_id }
+	pub fn new(id: String, name: String, picture: String) -> Self {
+		Self { 
+			id: id,
+			name: name,
+			picture: picture,
+		}
 	}
 }
 
 // Property Accessors.
 impl Ctx {
-	pub fn user_id(&self) -> u64 {
-		self.user_id
+	pub fn id(&self) -> String {
+		self.id.clone()
+	}
+
+	pub fn name(&self) -> String {
+		self.name.clone()
+	}
+
+	pub fn picture(&self) -> String {
+		self.picture.clone()
 	}
 }

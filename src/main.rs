@@ -11,6 +11,7 @@ use axum::Extension;
 use axum::middleware;
 use tower_http::services::ServeDir;
 use std::net::SocketAddr;
+use axum::response::Response;
 
 use models::SessionController;
 use axum::http::Method;
@@ -55,14 +56,15 @@ async fn main() -> Result<()> {
 
     // auth required routes
     let routes_control = routes::routes_control::routes(mc.clone())
-        .route_layer(middleware::from_fn(middlewares::mw::mw_require_auth))
-        .layer(CookieManagerLayer::new());
+        .route_layer(middleware::from_fn(middlewares::mw::mw_require_auth));
 
     let main_router = Router::new()
         .merge(routes_hello())
         .merge(routes::routes_login::routes())
         .merge(routes::routes_session::routes(mc.clone()))
         .nest("/api", routes_control)
+        .layer(middleware::map_response(main_response_mapper))
+        .layer(CookieManagerLayer::new())
         .fallback_service(routes_static())
         .layer(Extension(pool))
         .layer(cors);
@@ -78,6 +80,12 @@ async fn main() -> Result<()> {
         .unwrap();
 
     Ok(())
+}
+
+async fn main_response_mapper(res: Response) -> Response {
+    println!("->> {:<12} - main_response_mapper", "Mapper");
+    println!();
+    res
 }
 
 fn routes_static() -> Router {
