@@ -64,7 +64,10 @@ async fn main() -> Result<()> {
         .merge(routes::routes_session::routes(mc.clone()))
         .nest("/api", routes_control)
         .layer(middleware::map_response(main_response_mapper))
-        .layer(CookieManagerLayer::new())
+        .layer(middleware::from_fn_with_state(
+            mc.clone(),
+            middlewares::mw::mw_ctx_resolver,
+        ))
         .layer(Extension(pool))
         .layer(cors)
         .fallback_service(routes_static());

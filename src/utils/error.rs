@@ -2,7 +2,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 pub type Result<T> = core::result::Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Error {
     LoginFail,
     SessionDeleteFailIdNotFound { id: u64 },
@@ -15,9 +15,11 @@ pub enum Error {
     InvalidURL { url: String },
     LiveStreamNotSupported { url: String },
     PlayListParseErr { msg: String },
-    DBConnectionFail,
+    DBConnectionFail { source: String },
     AuthFailNoToken,
     AuthFailInvalidToken,
+    AuthFailCtxNotFound,
+    DBError { source: String },
 }
 
 impl IntoResponse for Error {
@@ -48,7 +50,9 @@ impl From<std::io::Error> for Error {
 
 impl From<sqlx::Error> for Error {
     fn from(_err: sqlx::Error) -> Self {
-        Error::DBConnectionFail
+        Error::DBConnectionFail {
+            source: format!("{:?}", _err),
+        }
     }
 
 }

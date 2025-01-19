@@ -37,7 +37,9 @@ async fn test_auth(
     ctx: Ctx,
 ) -> Result<()> {
 
-    println!("test auth");
-    println!("id in route: {}", ctx.id());
+    let id = ctx.id();
+    let name = ctx.name();
+    let picture = ctx.picture();
+    println!("->> test_auth id: {}, name: {}", id, name);
     Ok(())
 }
