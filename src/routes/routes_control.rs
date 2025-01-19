@@ -17,6 +17,8 @@ use std::sync::Arc;
 use axum::Router;
 use axum::routing::post;
 use axum::extract::State;
+use axum::Extension;
+use sqlx::PgPool;
 
 use crate::utils::error::{ Error, Result };
 use crate::models::SessionController;
@@ -31,6 +33,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
 
 async fn test_auth(
     State(mc): State<Arc<SessionController>>,
+    Extension(pool) : Extension<PgPool>,
     ctx: Ctx,
 ) -> Result<()> {
 

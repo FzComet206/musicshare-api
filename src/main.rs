@@ -65,9 +65,9 @@ async fn main() -> Result<()> {
         .nest("/api", routes_control)
         .layer(middleware::map_response(main_response_mapper))
         .layer(CookieManagerLayer::new())
-        .fallback_service(routes_static())
         .layer(Extension(pool))
-        .layer(cors);
+        .layer(cors)
+        .fallback_service(routes_static());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("->> Server listening on port 3000");

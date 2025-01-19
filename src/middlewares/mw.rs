@@ -7,6 +7,8 @@ use serde_json::Value;
 
 use async_trait::async_trait;
 use axum::extract::{ FromRequestParts, State };
+use axum::Extension;
+use sqlx::PgPool;
 
 use crate::utils::error::{ Error, Result };
 use crate::middlewares::AUTH_TOKEN;
