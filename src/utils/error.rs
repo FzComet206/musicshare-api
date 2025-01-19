@@ -15,6 +15,9 @@ pub enum Error {
     InvalidURL { url: String },
     LiveStreamNotSupported { url: String },
     PlayListParseErr { msg: String },
+    DBConnectionFail,
+    AuthFailNoToken,
+    AuthFailInvalidToken,
 }
 
 impl IntoResponse for Error {
@@ -41,4 +44,11 @@ impl From<std::io::Error> for Error {
             source: "Failed to create audio download directory".to_string(),
         }
     }
+}
+
+impl From<sqlx::Error> for Error {
+    fn from(_err: sqlx::Error) -> Self {
+        Error::DBConnectionFail
+    }
+
 }

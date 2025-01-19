@@ -8,19 +8,37 @@ use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tokio::task;
 use futures::stream::{FuturesUnordered, StreamExt};
+use sqlx::PgPool;
 
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
 const FFMPEG_PATH: &str = "./libs/ffmpeg";
 
-pub struct FileManager;
+pub struct FMParameters {
+    pub url: String,
+    pub userid: u64,
+    pub pool: PgPool,
+    pub semaphore: Arc<Semaphore>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FileManager {
+    pub semaphore: Arc<Semaphore>,
+}
 
 impl FileManager {
-    pub async fn init() -> Result<()> {
-        // gst::init()?;
-        Ok(())
+    pub async fn new() -> Result<(Self)> {
+        // max concurrent download, conversion, and upload task is 12
+        let semaphore = Arc::new(Semaphore::new(12));
+
+        Ok(Self {
+            semaphore
+        })
     }
 
-    pub async fn run_pipeline(url: String) -> Result<()> {
+    pub async fn run_pipeline(&self, ctx: FMParameters) -> Result<()> {
+
+        // rest of the fucntions can be static, pass userid, pool, and semaphore clones 
+        let url = ctx.url;
 
         let is_playlist = url.contains("playlist") || url.contains("list");
         if is_playlist {
@@ -28,78 +46,6 @@ impl FileManager {
         } else {
             Self::is_live(url.clone()).await?;
             Self::download_audio(url.clone()).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn download_playlist(url: String) -> Result<()> {
-
-        let output = Command::new(YT_DLP_PATH)
-            .arg("--flat-playlist")
-            .arg("--dump-single-json")
-            .arg("--playlist-end")
-            .arg("20")
-            .arg(url.clone())
-            .output().await?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let parsed: Value = serde_json::from_str(&stdout).expect("Failed to parse JSON");
-
-            if let Some(entries) = parsed["entries"].as_array() {
-                let urls: Vec<_> = entries
-                    .iter()
-                    .filter_map(|entry| {
-                        entry["url"].as_str().map(String::from)
-                    })
-                    .collect();
-                
-                // task pool size
-                let semaphore = Arc::new(Semaphore::new(10));
-                let mut tasks = FuturesUnordered::new();
-
-                for url in urls {
-                    // for each url in the playlist, initiate download pipeline
-                    let sem_clone = semaphore.clone();
-
-                    tasks.push(task::spawn(async move{
-
-                        let _permit = sem_clone.acquire().await.unwrap();
-                        println!("Starting task: {}", url);
-                        Self::download_audio(url.clone()).await;
-
-                    }));
-                }
-
-            } else {
-                return Err(Error::PlayListParseErr { msg: "no entries found in the playlist".to_string() });
-            }
-        } else {
-            // Print the error message if the command fails
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::PlayListParseErr { msg: stderr.to_string() });
-        }
-
-        Ok(())
-    }
-
-    async fn is_live(url: String) -> Result<()> {
-
-        let output = Command::new(YT_DLP_PATH)
-            .arg("--print")
-            .arg("%(is_live)s")
-            .arg(url.clone())
-            .output()
-            .await?;
-        
-        if !output.status.success() {
-            return Err(Error::InvalidURL {url: url.to_string()});
-        }
-
-        let result = String::from_utf8_lossy(&output.stdout).trim() == "True";
-        if result{
-            return Err(Error::LiveStreamNotSupported {url: url.to_string()});
         }
 
         Ok(())
@@ -169,6 +115,76 @@ impl FileManager {
         Ok(())
     }
 
+    async fn download_playlist(url: String) -> Result<()> {
+
+        let output = Command::new(YT_DLP_PATH)
+            .arg("--flat-playlist")
+            .arg("--dump-single-json")
+            .arg("--playlist-end")
+            .arg("20")
+            .arg(url.clone())
+            .output().await?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let parsed: Value = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+            if let Some(entries) = parsed["entries"].as_array() {
+                let urls: Vec<_> = entries
+                    .iter()
+                    .filter_map(|entry| {
+                        entry["url"].as_str().map(String::from)
+                    })
+                    .collect();
+                
+                // task pool size
+                let semaphore = Arc::new(Semaphore::new(10));
+                let mut tasks = FuturesUnordered::new();
+
+                for url in urls {
+                    // for each url in the playlist, initiate download pipeline
+                    let sem_clone = semaphore.clone();
+
+                    tasks.push(task::spawn(async move{
+
+                        let _permit = sem_clone.acquire().await.unwrap();
+                        println!("Starting task: {}", url);
+                        Self::download_audio(url.clone()).await;
+
+                    }));
+                }
+
+            } else {
+                return Err(Error::PlayListParseErr { msg: "no entries found in the playlist".to_string() });
+            }
+        } else {
+            // Print the error message if the command fails
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::PlayListParseErr { msg: stderr.to_string() });
+        }
+        Ok(())
+    }
+
+    async fn is_live(url: String) -> Result<()> {
+
+        let output = Command::new(YT_DLP_PATH)
+            .arg("--print")
+            .arg("%(is_live)s")
+            .arg(url.clone())
+            .output()
+            .await?;
+        
+        if !output.status.success() {
+            return Err(Error::InvalidURL {url: url.to_string()});
+        }
+
+        let result = String::from_utf8_lossy(&output.stdout).trim() == "True";
+        if result{
+            return Err(Error::LiveStreamNotSupported {url: url.to_string()});
+        }
+        Ok(())
+    }
+
     pub async fn get_file_size(youtube_url: String) -> Result<()> {
     // Path to the yt-dlp binary
         let yt_dlp_path = "./libs/yt-dlp";
@@ -200,9 +216,6 @@ impl FileManager {
                 return Err(Error::FileTooLarge { size, limit })
             }
         } 
-
         Ok(())
     }
-
-
 }

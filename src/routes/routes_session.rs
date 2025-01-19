@@ -25,7 +25,9 @@ use webrtc::ice_transport::ice_candidate::{
     RTCIceCandidate,
 };
 
-use crate::media::file_manager::FileManager;
+use crate::media::file_manager::{ FileManager, FMParameters };
+use axum::Extension;
+use sqlx::PgPool;
 
 #[derive(Debug, Deserialize)]
 struct SessionParams {
@@ -56,6 +58,8 @@ struct GetIceRequest {
 struct PlayTestRequest {
     url: String,
 }
+
+// this is a no auth route layer
 
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
@@ -172,6 +176,18 @@ async fn add_ice(
     })))
 }
 
+
+// add following apis
+
+// get all sessions with participants
+// join session with session uuid
+// exit session
+// get participants
+// get queue
+
+
+
+
 async fn create_session(
     State(mc): State<Arc<SessionController>>,
 ) -> Result<Json<Value>> {
@@ -203,10 +219,20 @@ async fn broadcast(
 
 async fn playtest(
     State(mc): State<Arc<SessionController>>,
+    Extension(pool): Extension<PgPool>,
     Json(body): Json<PlayTestRequest>,
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - playtest", "Handler");
-    FileManager::run_pipeline(body.url).await?;
+
+    let fm = mc.get_file_manager().await?;
+    fm.run_pipeline(
+        FMParameters {
+            url: body.url.clone(),
+            userid: 0,
+            pool: pool.clone(),
+            semaphore: fm.semaphore.clone(),
+        }
+    ).await?;
 
     Ok(Json(json!({
         "status": "ok",

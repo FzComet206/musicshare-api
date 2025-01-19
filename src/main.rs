@@ -1,56 +1,71 @@
 #![allow(unused)]
 
-pub use self::utils::error::{Error, Result};
+use self::utils::error::{Error, Result};
 
 use serde::Deserialize;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, get_service};
 use axum::extract::{Path, Query};
 use axum::Router;
+use axum::Extension;
+use axum::middleware;
 use tower_http::services::ServeDir;
 use std::net::SocketAddr;
 
 use models::SessionController;
-use tower_http::cors::{Any, CorsLayer};
 use axum::http::Method;
 use std::sync::Arc;
 
-mod auth;
-mod db;
-mod media;
+use tower_http::cors::{Any, CorsLayer};
+use tower_cookies::CookieManagerLayer;
+
+// handles api routes
 mod routes;
+// handles server state and relevant struct
 mod models;
+// handles media files
+mod media;
+// handles db connetion
+mod db;
+// handles errors, logging, and utilities
 mod utils;
+// handles authenticaion
+mod middlewares;
+// handles context
+mod ctx;
+
 // import error.rs module
 use crate::media::file_manager::FileManager;
+use crate::ctx::Ctx;
 
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    
-    // initialize gstreamer
-    // FileManager::download_audio(
-        // "https://www.youtube.com/watch?v=6J0DzHkAzoM&list=PLUfMEH0ZCPwsjpJ2suag3YkTpy_BxO9fY",
-        // "output"
-    // ).await?;
 
     // initialize session controller
     let mc = Arc::new(SessionController::new().await?);
     mc.create_session().await?;
-    
+    let pool = db::establish_connection().await?;
+
     // joining routes 
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
         .allow_headers(Any);
 
+    // auth required routes
+    let routes_control = routes::routes_control::routes(mc.clone())
+        .route_layer(middleware::from_fn(middlewares::mw::mw_require_auth))
+        .layer(CookieManagerLayer::new());
 
-    let routes_hello = Router::new()
-    .merge(routes_hello())
-    .merge(routes::routes_login::routes())
-    .nest("/api", routes::session::routes(mc.clone()))
-    .fallback_service(routes_static())
-    .layer(cors);
+    let main_router = Router::new()
+        .merge(routes_hello())
+        .merge(routes::routes_login::routes())
+        .merge(routes::routes_session::routes(mc.clone()))
+        .nest("/api", routes_control)
+        .fallback_service(routes_static())
+        .layer(Extension(pool))
+        .layer(cors);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("->> Server listening on port 3000");
@@ -58,7 +73,7 @@ async fn main() -> Result<()> {
     println!("");
 
     axum::Server::bind(&addr)
-        .serve(routes_hello.into_make_service())
+        .serve(main_router.into_make_service())
         .await
         .unwrap();
 

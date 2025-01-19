@@ -25,6 +25,7 @@ use webrtc::ice_transport::ice_candidate::{
 use webrtc::ice_transport::ice_gatherer_state::RTCIceGathererState;
 
 use std::collections::HashMap;
+use crate::media::file_manager::FileManager;
 
 
 #[derive(Clone, Debug)]
@@ -120,14 +121,15 @@ impl Session {
 #[derive(Clone, Debug)]
 pub struct SessionController{
     pub sessions: Arc<Mutex<Vec<Option<Session>>>>,
+    pub file_manager: Arc<Mutex<FileManager>>,
 }
-
 
 impl SessionController{
 
     pub async fn new() -> Result<Self> {
         Ok(Self {
             sessions: Arc::default(),
+            file_manager: Arc::new(Mutex::new(FileManager::new().await?)),
         })
     }
 
@@ -153,6 +155,11 @@ impl SessionController{
     pub async fn get_sessions(&self) -> Result<Vec<Session>> {
         let sessions = self.sessions.lock().await;
         Ok(sessions.iter().filter_map(|s| s.clone()).collect())
+    }
+
+    pub async fn get_file_manager(&self) -> Result<FileManager> {
+        let file_manager = self.file_manager.lock().await;
+        Ok(file_manager.clone())
     }
 }
 

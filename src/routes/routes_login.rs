@@ -5,7 +5,7 @@ use axum::Router;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-// return routes for login
+// this is a no auth layer
 pub fn routes() -> Router {
     Router::new().route("/api/login", post(api_login))
 }
