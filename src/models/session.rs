@@ -32,7 +32,6 @@ use crate::media::file_manager::FileManager;
 pub struct Session {
     pub id: u64,
     pub uuid: String,
-    // pub peer_connections: Arc<Mutex<Vec<PeerConnection>>>,
     pub peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     pub broadcaster: Broadcaster,
     pub queue: Arc<Mutex<Vec<String>>>,
@@ -120,7 +119,12 @@ impl Session {
 
 #[derive(Clone, Debug)]
 pub struct SessionController{
-    pub sessions: Arc<Mutex<Vec<Option<Session>>>>,
+    pub sessions: 
+        Arc<
+            Mutex<
+                HashMap<
+                    String, Option<Session>
+                    >>>,
     pub file_manager: Arc<Mutex<FileManager>>,
 }
 
@@ -138,23 +142,23 @@ impl SessionController{
         println!("->> {:<12} - create_session", "Controller");
 
         let mut sessions = self.sessions.lock().await;
-        let id = sessions.len() as u64;
         let mut session = Session::new().await?;
 
-        sessions.push(Some(session.clone()));
+        let uuid = uuid::Uuid::new_v4().to_string();
+        sessions.insert(uuid.clone(), Some(session.clone()));
 
         Ok(session)
     }
 
     pub async fn get_session(&self, id: u64) -> Result<Session> {
         let sessions = self.sessions.lock().await;
-        let session = sessions.get(id as usize).and_then(|f| f.clone());
+        let session = sessions.get(&id.to_string()).and_then(|f| f.clone());
         session.ok_or(Error::SessionNotFound { id })
     }
 
     pub async fn get_sessions(&self) -> Result<Vec<Session>> {
         let sessions = self.sessions.lock().await;
-        Ok(sessions.iter().filter_map(|s| s.clone()).collect())
+        Ok(sessions.values().filter_map(|f| f.clone()).collect())
     }
 
     pub async fn get_file_manager(&self) -> Result<FileManager> {

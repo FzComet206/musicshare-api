@@ -65,43 +65,41 @@ pub async fn mw_ctx_resolver<B>(
         .fetch_all(&pool)
         .await {
             Ok(row) => {
-                row.iter().for_each(|row| {
-                    let name: String = row.get("name");
-                    let picture: String = row.get("picture");
-                    let sub: String = row.get("sub");
-                    let result_ctx: Result<Ctx> = Ok(Ctx::new(sub, name, picture));
-                    req.extensions_mut().insert(result_ctx);
-                });
-
-                // get row length
-
-                if row.len() == 0 {
-                    return Err(Error::AuthFailInvalidToken);
-                }
-                
-            }
-            Err(_) => {
-                match sqlx::query(
-                    "INSERT INTO 
-                        users (oauth_type, sub, name, picture) 
-                        VALUES ('google', $1, $2, $3)"
-                    )
-                    .bind(id)
-                    .bind(name)
-                    .bind(picture)
-                    .execute(&pool)
-                    .await {
-                        Ok(_) => {
-                            println!("->> ctx_resolver - Inserted new user");
-                            let result_ctx: Result<Ctx> = Ok(Ctx::new(id.to_string(), name.to_string(), picture.to_string()));
+                match row.len() {
+                    1 => {
+                        row.iter().for_each(|row| {
+                            let name: String = row.get("name");
+                            let picture: String = row.get("picture");
+                            let sub: String = row.get("sub");
+                            let result_ctx: Result<Ctx> = Ok(Ctx::new(sub, name, picture));
                             req.extensions_mut().insert(result_ctx);
-                        }
-                        Err(e) => return Err(Error::DBError { source: format!("{:?}", e) }),
-                    };
+                        });
+                    }
+                    0 => {
+                        match sqlx::query(
+                            "INSERT INTO 
+                                users (oauth_type, sub, name, picture) 
+                                VALUES ('google', $1, $2, $3)"
+                            )
+                            .bind(id)
+                            .bind(name)
+                            .bind(picture)
+                            .execute(&pool)
+                            .await {
+                                Ok(_) => {
+                                    let result_ctx: Result<Ctx> = Ok(Ctx::new(id.to_string(), name.to_string(), picture.to_string()));
+                                    req.extensions_mut().insert(result_ctx);
+                                }
+                                Err(e) => return Err(Error::DBError { source: format!("{:?}", e) }),
+                        };
+                    }
+                    _ => return Err(Error::DBError { source: "Multiple users found".to_string() }),
+                }
+            }
+            Err(e) => {
+                return Err(Error::DBError { source: format!("{:?}", e) });
             }
         };
-
-    
 
     Ok(next.run(req).await)
 }

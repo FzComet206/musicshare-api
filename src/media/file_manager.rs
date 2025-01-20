@@ -9,6 +9,8 @@ use tokio::sync::Semaphore;
 use tokio::task;
 use futures::stream::{FuturesUnordered, StreamExt};
 use sqlx::PgPool;
+use dotenvy::dotenv;
+use std::env;
 
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
 const FFMPEG_PATH: &str = "./libs/ffmpeg";
@@ -27,8 +29,14 @@ pub struct FileManager {
 
 impl FileManager {
     pub async fn new() -> Result<(Self)> {
-        // max concurrent download, conversion, and upload task is 12
-        let semaphore = Arc::new(Semaphore::new(12));
+
+        dotenv().ok();
+        let max_concurrent_downloads = env::var("MAX_CONCURRENT_DOWNLOADS")
+            .unwrap_or("4".to_string())
+            .parse::<usize>()
+            .expect("MAX_CONCURRENT_DOWNLOADS must be a number");
+
+        let semaphore = Arc::new(Semaphore::new(max_concurrent_downloads));
 
         Ok(Self {
             semaphore
@@ -42,7 +50,7 @@ impl FileManager {
 
         let is_playlist = url.contains("playlist") || url.contains("list");
         if is_playlist {
-            Self::download_playlist(url.clone()).await?;
+            Self::download_playlist(&self, url.clone()).await?;
         } else {
             Self::is_live(url.clone()).await?;
             Self::download_audio(url.clone()).await?;
@@ -115,7 +123,7 @@ impl FileManager {
         Ok(())
     }
 
-    async fn download_playlist(url: String) -> Result<()> {
+    async fn download_playlist(&self, url: String) -> Result<()> {
 
         let output = Command::new(YT_DLP_PATH)
             .arg("--flat-playlist")
@@ -138,12 +146,11 @@ impl FileManager {
                     .collect();
                 
                 // task pool size
-                let semaphore = Arc::new(Semaphore::new(10));
                 let mut tasks = FuturesUnordered::new();
 
                 for url in urls {
                     // for each url in the playlist, initiate download pipeline
-                    let sem_clone = semaphore.clone();
+                    let sem_clone = self.semaphore.clone();
 
                     tasks.push(task::spawn(async move{
 

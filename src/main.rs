@@ -57,17 +57,18 @@ async fn main() -> Result<()> {
     // auth required routes
     let routes_control = routes::routes_control::routes(mc.clone())
         .route_layer(middleware::from_fn(middlewares::mw::mw_require_auth));
+    let routes_session = routes::routes_session::routes(mc.clone());
 
     let main_router = Router::new()
         .merge(routes_hello())
         .merge(routes::routes_login::routes())
-        .merge(routes::routes_session::routes(mc.clone()))
         .nest("/api", routes_control)
-        .layer(middleware::map_response(main_response_mapper))
         .layer(middleware::from_fn_with_state(
             mc.clone(),
             middlewares::mw::mw_ctx_resolver,
         ))
+        .nest("/session", routes_session)
+        .layer(middleware::map_response(main_response_mapper))
         .layer(Extension(pool))
         .layer(cors)
         .fallback_service(routes_static());
