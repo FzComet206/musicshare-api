@@ -25,7 +25,7 @@ use webrtc::ice_transport::ice_candidate::{
     RTCIceCandidate,
 };
 
-use crate::media::file_manager::{ FileManager, FMParameters };
+use crate::media::file_manager::{ FileManager, FMDownloadParams};
 use axum::Extension;
 use sqlx::PgPool;
 
@@ -59,6 +59,12 @@ struct PlayTestRequest {
     url: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct DownloadRequest {
+    url: String,
+    title: String,
+}
+
 // this is a no auth route layer
 
 pub fn routes(mc: Arc<SessionController>) -> Router {
@@ -69,7 +75,8 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/set_ice", post(add_ice))
         .route("/broadcast", get(broadcast))
         .route("/state", get(server_state))
-        .route("/playtest", post(playtest))
+        .route("/get_metadata", post(get_metadata))
+        .route("/download", post(download))
         .with_state(mc)
 }
 
@@ -217,25 +224,57 @@ async fn broadcast(
     })))
 }
 
-async fn playtest(
+async fn download(
     State(mc): State<Arc<SessionController>>,
     Extension(pool): Extension<PgPool>,
-    Json(body): Json<PlayTestRequest>,
+    Json(body): Json<DownloadRequest>,
 ) -> Result<Json<Value>> {
-    println!("->> {:<12} - playtest", "Handler");
+    println!("->> {:<12} - download", "Handler");
 
     let fm = mc.get_file_manager().await?;
-    fm.run_pipeline(
-        FMParameters {
+    fm.process_audio(
+        FMDownloadParams {
             url: body.url.clone(),
+            title: body.title.clone(),
+            uuid: uuid::Uuid::new_v4().to_string(),
             userid: 0,
             pool: pool.clone(),
-            semaphore: fm.semaphore.clone(),
         }
     ).await?;
 
     Ok(Json(json!({
         "status": "ok",
-        "message": "Playing test",
+        "message": "Downloading",
     })))
+}
+
+async fn get_metadata(
+    State(mc): State<Arc<SessionController>>,
+    Extension(pool): Extension<PgPool>,
+    Json(body): Json<PlayTestRequest>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - get_metadata", "Handler");
+
+    let is_playlist = body.url.contains("playlist") || body.url.contains("list");
+
+    if is_playlist {
+        let list = FileManager::get_list(body.url.clone()).await?;
+        Ok(Json(json!({
+            "status": "ok",
+            "list": list,
+        })))
+    } else {
+        if FileManager::is_live(body.url.clone()).await? {
+            Ok(Json(json!({
+                "status": "ok",
+                "message": "Live stream is not supported",
+            })))
+        } else {
+            let result = FileManager::get_title(body.url.clone()).await?; 
+            Ok(Json(json!({
+                "status": "ok",
+                "list": result,
+            })))
+        }
+    }
 }

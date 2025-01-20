@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Download Test</title>
+</head>
+<body>
+    <h1>Download Test</h1>
+    <!-- Audio player element for playback -->
+    <script>
+        (async function () {
+            const SERVER_URL = "http://localhost:3000"; // Replace with your server's URL if different
+            // post request to server to get list of files
+            const response = await fetch(`${SERVER_URL}/session/get_metadata`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    url: 
+                    // "https://www.youtube.com/watch?v=UpqigplV_3I"
+                    "https://www.youtube.com/watch?v=I76wvt0aEE4&list=RDI76wvt0aEE4&start_radio=1"
+                }),
+            });
+            
+            data = await response.json();
+            const list = data.list;
+
+            list.forEach(element => {
+                url = element[1];
+                title = element[0];
+                fetch(`${SERVER_URL}/session/download`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        url: url,
+                        title: title
+                    }),
+                }).then(response => {
+                    console.log("Downloaded", element[0]);
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

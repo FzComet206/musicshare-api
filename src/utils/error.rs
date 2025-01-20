@@ -20,6 +20,7 @@ pub enum Error {
     AuthFailInvalidToken,
     AuthFailCtxNotFound,
     DBError { source: String },
+    ContentNotFound { msg: String },
 }
 
 impl IntoResponse for Error {

@@ -15,12 +15,14 @@ use std::env;
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
 const FFMPEG_PATH: &str = "./libs/ffmpeg";
 
-pub struct FMParameters {
+pub struct FMDownloadParams{
     pub url: String,
+    pub title: String,
+    pub uuid: String,
     pub userid: u64,
     pub pool: PgPool,
-    pub semaphore: Arc<Semaphore>,
 }
+
 
 #[derive(Clone, Debug)]
 pub struct FileManager {
@@ -43,23 +45,71 @@ impl FileManager {
         })
     }
 
-    pub async fn run_pipeline(&self, ctx: FMParameters) -> Result<()> {
-
-        // rest of the fucntions can be static, pass userid, pool, and semaphore clones 
-        let url = ctx.url;
-
-        let is_playlist = url.contains("playlist") || url.contains("list");
-        if is_playlist {
-            Self::download_playlist(&self, url.clone()).await?;
+    // get the title + url of the content in url
+    pub async fn get_title(url: String) -> Result<Vec<(String, String)>> {
+        let output = Command::new(YT_DLP_PATH)
+            .arg("--get-title")
+            .arg(url.clone())
+            .output()
+            .await?;
+        
+        if output.status.success() {
+            let title = String::from_utf8_lossy(&output.stdout);
+            Ok(vec![(title.trim().to_string(), url.clone())])
         } else {
-            Self::is_live(url.clone()).await?;
-            Self::download_audio(url.clone()).await?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::ContentNotFound { msg: stderr.to_string() });
         }
-
-        Ok(())
     }
 
-    pub async fn download_audio(url: String) -> Result<()> {
+    // get the list of titles + urls in the playlist url
+    pub async fn get_list(url: String) -> Result<Vec<(String, String)>> {
+
+        let output = Command::new(YT_DLP_PATH)
+            .arg("--flat-playlist")
+            .arg("--dump-single-json")
+            .arg("--playlist-end")
+            .arg("20")
+            .arg(url.clone())
+            .output().await?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let parsed: Value = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+            if let Some(entries) = parsed["entries"].as_array() {
+                // return a tuple of entry["title"] and entry["url"]
+                let mut data = Vec::<(String, String)>::new();
+                for entry in entries.iter() {
+                    data.push(
+                        (
+                            entry["title"].as_str().map(String::from).unwrap_or("".to_string()),
+                            entry["url"].as_str().map(String::from).unwrap_or("".to_string())
+                        )
+                    )
+                }
+                Ok(data)
+            } else {
+                return Err(Error::PlayListParseErr { msg: "no entries found in the playlist".to_string() });
+            }
+        } else {
+            // Print the error message if the command fails
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::PlayListParseErr { msg: stderr.to_string() });
+        }
+    }
+
+    pub async fn process_audio(&self, params: FMDownloadParams) -> Result<()> {
+
+        let url = params.url.clone();
+        let title = params.title.clone();
+        let uuid = params.uuid.clone();
+        let userid = params.userid.clone();
+        let pool = params.pool.clone();
+
+        // limit the number of concurrent downloads
+        let sem_clone = self.semaphore.clone();
+        let _permit = sem_clone.acquire().await.unwrap();
 
         FileManager::get_file_size(url.clone()).await?;
         let output_dir = "./output";
@@ -92,15 +142,9 @@ impl FileManager {
         
         if output.status.success() {
             println!("Audio downloaded successfully!");
-
-            // get audio title
-            // notify the user that the audio has been downloaded 
-
         } else {
             eprintln!("Failed to download audio. Status: {:?}", output.status);
         }
-
-
 
         let status = Command::new(FFMPEG_PATH)
             .arg("-y")
@@ -114,12 +158,83 @@ impl FileManager {
             .arg(format!("{}/{}.ogg", converted_dir, uuid)) // Output file
             .status()
             .await?;
-
     
         // store audio title and uuid to database
-        // notify the user that the audio has been converted
-        // upload the ogg to s3, then delete both the mp3 and ogg files
 
+        match sqlx::query(
+            "
+            INSERT INTO files (user_id, url, uuid, name)
+            VALUES ($1, $2, $3, $4)
+            ")
+            .bind(userid as i64)
+            .bind(url)
+            .bind(uuid)
+            .bind(title)
+            .execute(&pool)
+            .await {
+                Ok(_) => {
+                    println!("Audio metadata stored successfully!");
+                }
+                Err(e) => {
+                    eprintln!("Failed to store audio metadata. Error: {:?}", e);
+                }
+            }
+
+        Ok(())
+    }
+
+
+    pub async fn is_live(url: String) -> Result<(bool)> {
+
+        let output = Command::new(YT_DLP_PATH)
+            .arg("--print")
+            .arg("%(is_live)s")
+            .arg(url.clone())
+            .output()
+            .await?;
+        
+        if !output.status.success() {
+            return Err(Error::InvalidURL {url: url.to_string()});
+        }
+
+        let result = String::from_utf8_lossy(&output.stdout).trim() == "True";
+        if result {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub async fn get_file_size(youtube_url: String) -> Result<()> {
+    // Path to the yt-dlp binary
+        let yt_dlp_path = "./libs/yt-dlp";
+
+        // Run yt-dlp to get the file size
+        let output = Command::new(yt_dlp_path)
+            .arg("-f")
+            .arg("bestaudio") // Specify best audio format
+            .arg("--print")
+            .arg("filesize") // Print the estimated file size
+            .arg(youtube_url)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            eprintln!(
+                "Failed to fetch file size. Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return Ok(());
+        }
+
+        let limit = 200_000_000;
+        let size_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if let Ok(size) = size_str.parse::<u64>() {
+            println!("File size: {}", size);
+
+            if size > limit {
+                return Err(Error::FileTooLarge { size, limit })
+            }
+        } 
         Ok(())
     }
 
@@ -156,7 +271,7 @@ impl FileManager {
 
                         let _permit = sem_clone.acquire().await.unwrap();
                         println!("Starting task: {}", url);
-                        Self::download_audio(url.clone()).await;
+                        // Self::download_audio(url.clone()).await;
 
                     }));
                 }
@@ -169,60 +284,6 @@ impl FileManager {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(Error::PlayListParseErr { msg: stderr.to_string() });
         }
-        Ok(())
-    }
-
-    async fn is_live(url: String) -> Result<()> {
-
-        let output = Command::new(YT_DLP_PATH)
-            .arg("--print")
-            .arg("%(is_live)s")
-            .arg(url.clone())
-            .output()
-            .await?;
-        
-        if !output.status.success() {
-            return Err(Error::InvalidURL {url: url.to_string()});
-        }
-
-        let result = String::from_utf8_lossy(&output.stdout).trim() == "True";
-        if result{
-            return Err(Error::LiveStreamNotSupported {url: url.to_string()});
-        }
-        Ok(())
-    }
-
-    pub async fn get_file_size(youtube_url: String) -> Result<()> {
-    // Path to the yt-dlp binary
-        let yt_dlp_path = "./libs/yt-dlp";
-
-        // Run yt-dlp to get the file size
-        let output = Command::new(yt_dlp_path)
-            .arg("-f")
-            .arg("bestaudio") // Specify best audio format
-            .arg("--print")
-            .arg("filesize") // Print the estimated file size
-            .arg(youtube_url)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            eprintln!(
-                "Failed to fetch file size. Error: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return Ok(());
-        }
-
-        let limit = 200_000_000;
-        let size_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if let Ok(size) = size_str.parse::<u64>() {
-            println!("File size: {}", size);
-
-            if size > limit {
-                return Err(Error::FileTooLarge { size, limit })
-            }
-        } 
         Ok(())
     }
 }
