@@ -21,6 +21,9 @@ pub enum Error {
     AuthFailCtxNotFound,
     DBError { source: String },
     ContentNotFound { msg: String },
+    DownloadFailed { url: String },
+    ConversionFailed { url: String },
+    DatabaseWriteError { msg: String },
 }
 
 impl IntoResponse for Error {

@@ -2,6 +2,7 @@ use crate::utils::error::{ Error, Result };
 use std::path::Path;
 use std::fs::File;
 use std::io::Write;
+use std::process::Stdio;
 use std::sync::Arc;
 use serde_json::Value;
 use tokio::process::Command;
@@ -11,6 +12,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use sqlx::PgPool;
 use dotenvy::dotenv;
 use std::env;
+use aws_sdk_s3::{config::Region, Client};
 
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
 const FFMPEG_PATH: &str = "./libs/ffmpeg";
@@ -18,7 +20,6 @@ const FFMPEG_PATH: &str = "./libs/ffmpeg";
 pub struct FMDownloadParams{
     pub url: String,
     pub title: String,
-    pub uuid: String,
     pub userid: u64,
     pub pool: PgPool,
 }
@@ -27,21 +28,26 @@ pub struct FMDownloadParams{
 #[derive(Clone, Debug)]
 pub struct FileManager {
     pub semaphore: Arc<Semaphore>,
+    pub max_file_size: u64,
 }
 
 impl FileManager {
     pub async fn new() -> Result<(Self)> {
 
         dotenv().ok();
-        let max_concurrent_downloads = env::var("MAX_CONCURRENT_DOWNLOADS")
+        let max_concurrent_downloads = env::var("MAX_CONCURRENT_TASKS")
             .unwrap_or("4".to_string())
             .parse::<usize>()
-            .expect("MAX_CONCURRENT_DOWNLOADS must be a number");
+            .expect("MAX_CONCURRENT_TASKS must be a number");
 
         let semaphore = Arc::new(Semaphore::new(max_concurrent_downloads));
 
         Ok(Self {
-            semaphore
+            semaphore,
+            max_file_size: env::var("MAX_FILE_SIZE")
+                .unwrap_or("100000000".to_string())
+                .parse::<u64>()
+                .expect("MAX_FILE_SIZE must be a number"),
         })
     }
 
@@ -99,19 +105,44 @@ impl FileManager {
         }
     }
 
-    pub async fn process_audio(&self, params: FMDownloadParams) -> Result<()> {
+    pub async fn process_audio(&self, params: FMDownloadParams) -> 
+        Result<task::JoinHandle<Result<()>>> 
+    {
+
+        let sem_clone = self.semaphore.clone();
+        let url = params.url.clone();
+
+        let handle = task::spawn(async move {
+            let _permit = sem_clone.acquire().await.unwrap();
+            match FileManager::_process_audio(params).await {
+                Ok(_) => {
+                    Ok(())
+                }
+
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        });
+
+        Ok(handle)
+    }
+
+    pub async fn _process_audio(params: FMDownloadParams) -> Result<()> {
 
         let url = params.url.clone();
         let title = params.title.clone();
-        let uuid = params.uuid.clone();
         let userid = params.userid.clone();
         let pool = params.pool.clone();
+        let uuid = uuid::Uuid::new_v4().to_string();
 
-        // limit the number of concurrent downloads
-        let sem_clone = self.semaphore.clone();
-        let _permit = sem_clone.acquire().await.unwrap();
+        match FileManager::get_file_size(url.clone()).await {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
 
-        FileManager::get_file_size(url.clone()).await?;
         let output_dir = "./output";
         let converted_dir = "./converted";
 
@@ -124,7 +155,6 @@ impl FileManager {
             tokio::fs::create_dir_all(converted_dir).await?;
         }
 
-        let mut uuid = uuid::Uuid::new_v4().to_string();
 
         // Construct the command to download audio
         let output = Command::new(YT_DLP_PATH)
@@ -134,19 +164,18 @@ impl FileManager {
             .arg("--audio-format")
             .arg("mp3") // Convert audio to OGG format
             .arg("--output")
-            // .arg(format!("{}/%(title)s.%(ext)s", output_dir)) // Set output file format
             .arg(format!("{}/{}", output_dir, uuid)) // Set output file format
             .arg(url.clone())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .output()
             .await?;
         
-        if output.status.success() {
-            println!("Audio downloaded successfully!");
-        } else {
-            eprintln!("Failed to download audio. Status: {:?}", output.status);
+        if !output.status.success() {
+            return Err(Error::DownloadFailed { url: url.to_string() });
         }
 
-        let status = Command::new(FFMPEG_PATH)
+        let convert = Command::new(FFMPEG_PATH)
             .arg("-y")
             .arg("-i")
             .arg(format!("{}/{}.mp3", output_dir, uuid)) // Input file
@@ -156,11 +185,24 @@ impl FileManager {
             .arg("20000") // Set page duration
             .arg("-vn") // Disable video
             .arg(format!("{}/{}.ogg", converted_dir, uuid)) // Output file
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .await?;
-    
-        // store audio title and uuid to database
+        
+        // remove the downloaded file mp3
+        tokio::fs::remove_file(format!("{}/{}.mp3", output_dir, uuid)).await?;
 
+        if !convert.success() {
+            return Err(Error::ConversionFailed { url: url.to_string() });
+        }
+
+        // upload the file to s3
+
+        // delete the files in convert
+
+
+        // store the metadata in the database
         match sqlx::query(
             "
             INSERT INTO files (user_id, url, uuid, name)
@@ -168,15 +210,14 @@ impl FileManager {
             ")
             .bind(userid as i64)
             .bind(url)
-            .bind(uuid)
+            .bind(uuid.clone())
             .bind(title)
             .execute(&pool)
             .await {
                 Ok(_) => {
-                    println!("Audio metadata stored successfully!");
                 }
                 Err(e) => {
-                    eprintln!("Failed to store audio metadata. Error: {:?}", e);
+                    return Err(Error::DatabaseWriteError { msg: e.to_string() });
                 }
             }
 
@@ -205,7 +246,10 @@ impl FileManager {
     }
 
     pub async fn get_file_size(youtube_url: String) -> Result<()> {
-    // Path to the yt-dlp binary
+
+        dotenv().ok();
+
+        // Path to the yt-dlp binary
         let yt_dlp_path = "./libs/yt-dlp";
 
         // Run yt-dlp to get the file size
@@ -226,12 +270,17 @@ impl FileManager {
             return Ok(());
         }
 
-        let limit = 200_000_000;
+        let limit = env::var("MAX_FILE_SIZE")
+            .unwrap_or("100000000".to_string())
+            .parse::<u64>()
+            .expect("MAX_FILE_SIZE must be a number");
+
         let size_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if let Ok(size) = size_str.parse::<u64>() {
             println!("File size: {}", size);
 
             if size > limit {
+                println!("File size exceeds limit: {}", limit);
                 return Err(Error::FileTooLarge { size, limit })
             }
         } 

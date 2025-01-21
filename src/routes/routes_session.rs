@@ -232,15 +232,17 @@ async fn download(
     println!("->> {:<12} - download", "Handler");
 
     let fm = mc.get_file_manager().await?;
-    fm.process_audio(
+
+    let join_handle = fm.process_audio(
         FMDownloadParams {
             url: body.url.clone(),
             title: body.title.clone(),
-            uuid: uuid::Uuid::new_v4().to_string(),
-            userid: 0,
+            userid: 1,
             pool: pool.clone(),
         }
     ).await?;
+
+    join_handle.await;
 
     Ok(Json(json!({
         "status": "ok",

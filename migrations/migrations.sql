@@ -14,7 +14,7 @@ CREATE TABLE Files (
     file_id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES Users(user_id) ON DELETE CASCADE,
     url VARCHAR(255) NOT NULL,
-    uuid UUID NOT NULL UNIQUE,
+    uuid VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255),
     name_tsv tsvector,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
