@@ -73,7 +73,6 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/set_answer", post(set_answer))
         .route("/get_ice", post(get_ice))
         .route("/set_ice", post(add_ice))
-        .route("/broadcast", get(broadcast))
         .route("/state", get(server_state))
         .route("/get_metadata", post(get_metadata))
         .route("/download", post(download))
@@ -192,9 +191,6 @@ async fn add_ice(
 // get participants
 // get queue
 
-
-
-
 async fn create_session(
     State(mc): State<Arc<SessionController>>,
 ) -> Result<Json<Value>> {
@@ -208,21 +204,6 @@ async fn create_session(
     })))
 }
 
-async fn broadcast(
-    // get request body
-    State(mc): State<Arc<SessionController>>,
-) -> Result<Json<Value>> {
-    println!("->> {:<12} - broadcast", "Handler");
-
-    let mut session = mc.get_session(0).await?;
-
-    session.broadcaster.broadcast_audio_from_file("output/converted.ogg").await?;
-
-    Ok(Json(json!({
-        "status": "ok",
-        "message": "Broadcasting",
-    })))
-}
 
 async fn download(
     State(mc): State<Arc<SessionController>>,
@@ -231,9 +212,7 @@ async fn download(
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - download", "Handler");
 
-    let fm = mc.get_file_manager().await?;
-
-    fm.process_audio(
+    mc.process_audio(
         FMDownloadParams {
             url: body.url.clone(),
             title: body.title.clone(),

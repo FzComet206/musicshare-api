@@ -25,7 +25,9 @@ use webrtc::ice_transport::ice_candidate::{
 use webrtc::ice_transport::ice_gatherer_state::RTCIceGathererState;
 
 use std::collections::HashMap;
-use crate::media::file_manager::FileManager;
+use crate::media::file_manager::{ FileManager, FMDownloadParams };
+use crate::models::queue::PlayQueue;
+use crate::models::queue::QueueAction::{ Next, Stop, Pass, NotFound };
 
 
 #[derive(Clone, Debug)]
@@ -34,11 +36,10 @@ pub struct Session {
     pub uuid: String,
     pub peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     pub broadcaster: Broadcaster,
-    pub queue: Arc<Mutex<Vec<String>>>,
+    pub queue: Arc<Mutex<PlayQueue>>,
 } 
 
 impl Session {
-
     pub async fn new() -> Result<Self> {
 
         let broadcaster = Broadcaster::new().await?;
@@ -48,10 +49,9 @@ impl Session {
             uuid: uuid::Uuid::new_v4().to_string(),
             peer_connections: Arc::new(Mutex::new(HashMap::new())),
             broadcaster: broadcaster,
-            queue: Arc::new(Mutex::new(Vec::new())),
+            queue: Arc::new(Mutex::new(PlayQueue::new())),
         })
     }
-
 
     pub async fn create_peer(& mut self) -> Result<(String)> {
 
@@ -67,7 +67,6 @@ impl Session {
         Ok(uuid)
     }
 
-    // add uuid for identification
     pub async fn get_offer(&self, peerid: String) -> Result<String> {
 
         println!("->> {:<12} - {} - get_sdp_offer", "Session", peerid);
@@ -113,6 +112,75 @@ impl Session {
             peers.push(format!("uuid: {} -- active: {}", uuid, *active));
         }
         Ok(peers)
+    }
+
+    // handles playback update when the first item of the queue is effected
+    pub async fn on_queue_change_effect(&self, key: String) -> Result<()> {
+        Ok(())
+        // downlaod the file with key into session folder
+
+        // stop the broadcasting now and start new broadcasting with key
+    }
+
+    pub async fn on_broadcasting_end(&self) -> Result<()> {
+        Ok(())
+        // remove the first item from the queue
+        // if there are more items in the queue
+        // start braodcasting with the next item
+    }
+
+    pub async fn get_queue(&self) -> Result<Vec<Vec<String>>> {
+        let queue = self.queue.lock().await;
+        Ok(queue.get_all())
+    }
+
+    // queue change opreations pass in a function call back
+    pub async fn add_to_queue(&self, key: String, title: String, url: String) -> Result<()> {
+        let mut queue = self.queue.lock().await;
+        match queue.add(key, title, url) {
+            Next(key) => {
+                // handle the first item in the queue
+                todo!()
+            },
+            Pass => (),
+            _ => ()
+        }
+        Ok(())
+    }
+
+    pub async fn remove_from_queue(&self, key: String) -> Result<()> {
+        let mut queue = self.queue.lock().await;
+        match queue.remove(key) {
+            Next(key) => {
+                // handle the next item in the queue
+                todo!()
+            },
+            Stop => {
+                // handle the end of the queue
+                todo!()
+            },
+            NotFound => {
+                return Err(Error::QueueError { msg: "Key not found".to_string() });
+            },
+            Pass => ()
+        }
+        Ok(())
+    }
+
+    pub async fn reorder_queue(&self, key: String, new_index: u64) -> Result<()> {
+        let mut queue = self.queue.lock().await;
+        match queue.reorder(key, new_index as usize) {
+            Next(key) => {
+                // handle the next item in the queue
+                todo!()
+            },
+            NotFound => {
+                return Err(Error::QueueError { msg: "Key not found".to_string() });
+            },
+            Pass => (),
+            _ => ()
+        }
+        Ok(())
     }
 }
 
@@ -165,5 +233,12 @@ impl SessionController{
         let file_manager = self.file_manager.lock().await;
         Ok(file_manager.clone())
     }
+
+    pub async fn process_audio(&self, params: FMDownloadParams) -> Result<()> {
+        let file_manager = self.file_manager.lock().await;
+        file_manager.process_audio(params).await?;
+        Ok(())
+    }
+    
 }
 

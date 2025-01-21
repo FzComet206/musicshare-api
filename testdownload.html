@@ -23,7 +23,9 @@
             data = await response.json();
             const list = data.list;
 
-            list.forEach(element => {
+            for (let i = 0; i < list.length; i++) {
+
+                const element = list[i];
                 url = element[1];
                 title = element[0];
                 fetch(`${SERVER_URL}/session/download`, {
@@ -36,7 +38,8 @@
                 }).then(response => {
                     console.log("Downloaded", element[0]);
                 });
-            });
+            }
+
         })();
     </script>
 </body>

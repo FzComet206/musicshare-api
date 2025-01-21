@@ -25,6 +25,7 @@ pub enum Error {
     ConversionFailed { url: String },
     DatabaseWriteError { msg: String },
     UploadFailed { msg: String },
+    QueueError { msg: String },
 }
 
 impl IntoResponse for Error {
