@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC Test</title>
+    <style>
+        /* Style the play button */
+        #playButton {
+            font-size: 24px; /* Larger text */
+            padding: 15px 30px; /* Increase padding */
+            background-color: #4CAF50; /* Green background */
+            color: white; /* White text */
+            border: none; /* Remove border */
+            border-radius: 8px; /* Rounded corners */
+            cursor: pointer; /* Pointer cursor on hover */
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3); /* Optional shadow */
+        }
+
+        #playButton:hover {
+            background-color: #45a049; /* Slightly darker green on hover */
+        }
+    </style>
+</head>
+<body>
+    <h1>WebRTC Test</h1>
+     <audio id="audioElement" controls autoplay></audio>
+     <button id="playButton"></button>
+    <!-- Audio player element for playbkack -->
+    <script>
+        (async function () {
+            const SERVER_URL = "http://localhost:3000"; // Replace with your server's URL if different
+
+            let iceCandidatesQueue = []; // Queue for ICE candidates
+            let answerSent = false; // Flag to check if the answer has been sent
+
+            // Fetch SDP offer from the server
+            async function getOffer() {
+                const response = await fetch(`${SERVER_URL}/api/get_offer`, {
+                    method: "GET",
+                    headers: { "Content-Type": "application/json" },
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to get offer: ${response.statusText}`);
+                }
+                const data = await response.json();
+                console.log("Received SDP Offer with UUID: ", data.peerid);
+                return data;
+            }
+
+            // Send SDP answer to the server
+            async function sendAnswer(sdp, peerid) {
+                const response = await fetch(`${SERVER_URL}/api/set_answer`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sdp, peerid }),
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to send answer: ${response.statusText}`);
+                }
+                console.log("Sent SDP Answer");
+
+                while (iceCandidatesQueue.length > 0) {
+                    const candidate = iceCandidatesQueue.shift();
+                    await sendIceCandidate(candidate, peerid);
+                }
+            }
+
+
+            async function setIceCandidates(peerid) {
+                const response = await fetch(`${SERVER_URL}/api/get_ice`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        peerid: peerid
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to get offer: ${response.statusText}`);
+                }
+                const data = await response.json();
+                data.forEach(candidate => {
+                    console.log("Received ice candidates", candidate);
+                });
+
+                return data;
+            }
+            // send ice candidate back to server
+            async function sendIceCandidate(candidate, peerid) {
+                const response = await fetch(`${SERVER_URL}/api/set_ice`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        candidate: candidate.candidate,
+                        sdp_mid: candidate.sdpMid,
+                        sdp_mline_index: candidate.sdpMLineIndex,
+                        username_fragment: candidate.usernameFragment,
+                        peerid: peerid,
+                    }),
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to send ICE candidate: ${response.statusText}`);
+                }
+                console.log("ICE Candidate sent: ", candidate.candidate);
+            }
+
+            // Wait for ICE gathering to complete
+            function waitForIceGatheringComplete(peerConnection) {
+                return new Promise((resolve) => {
+                    if (peerConnection.iceGatheringState === "complete") {
+                        resolve();
+                    } else {
+                        const listener = () => {
+                            if (peerConnection.iceGatheringState === "complete") {
+                                peerConnection.removeEventListener("icegatheringstatechange", listener);
+                                resolve();
+                            }
+                        };
+                        peerConnection.addEventListener("icegatheringstatechange", listener);
+                    }
+                });
+            }
+
+            // Main function to set up WebRTC connection
+            async function testWebRTC() {
+                try {
+                    // Step 1: Create a new RTCPeerConnection
+                    const peerConnection = new RTCPeerConnection({
+                        iceServers: [
+                            // { urls: "stun:stun.l.google.com:19302" },
+                        ],
+                        iceTransportPolicy: "all"
+                    });
+
+                    peerConnection.ontrack = (event) => {
+                        console.log("Audio track received:", event.streams[0]);
+                        console.log("Track received:", event.track);
+
+                        const audioElement = document.getElementById("audioElement");
+                        const playButton = document.getElementById("playButton");
+
+                        audioElement.srcObject = event.streams[0];
+
+                        playButton.addEventListener("click", () => {
+                            audioElement.play().then(() => {
+                                console.log("Audio playback started!");
+                            }).catch(error => {
+                                console.error("Playback error:", error);
+                                alert("Unable to play audio: " + error.message);
+                            });
+                        });
+                    };
+
+                    peerConnection.onconnectionstatechange = (event) => {
+                        console.log("Connection state change:", peerConnection.connectionState);
+                    };
+                    peerConnection.onicegatheringstatechange = (event) => {
+                        console.log("ice gathering state change:", peerConnection.iceGatheringState);
+                    };
+
+                    peerConnection.onicecandidate = async (event) => {
+                        if (event.candidate) {
+                            if (answerSent) {
+                                await sendIceCandidate(event.candidate);
+                            } else {
+                                iceCandidatesQueue.push(event.candidate);
+                            }
+                        } 
+                    };
+
+
+                    // peerConnection.ontrack = (event) => {
+                        // const audio = new Audio();
+                        // audio.srcObject = event.streams[0];
+                        // audio.autoplay = true;
+                        // audio.controls = true;
+                        // document.body.appendChild(audio);
+
+                        // console.log("Stream:", audio.srcObject);
+                        // console.log("track is enabled: ", event.track.enabled);
+                        // console.log("track is muted:", event.track.muted);
+                    // };
+
+
+
+                    // get offer
+                    const { offer, peerid } = await getOffer();
+                    await peerConnection.setRemoteDescription(
+                        new RTCSessionDescription({ type: "offer", sdp: offer })
+                    );
+
+                    // get answer
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+
+                    // set ice candidates
+                    const candidates = await setIceCandidates(peerid);
+                    candidates.forEach(candidateObj => {
+
+                        const candidateString = `candidate:${candidateObj.foundation} ${candidateObj.component} ${candidateObj.protocol} ${candidateObj.priority} ${candidateObj.address} ${candidateObj.port} typ ${candidateObj.typ}${
+                                candidateObj.related_address ? ` raddr ${candidateObj.related_address} rport ${candidateObj.related_port}` : ""
+                            }${
+                                candidateObj.tcp_type !== "unspecified" ? ` tcptype ${candidateObj.tcp_type}` : ""
+                            }`;
+                        
+                        console.log("candidate string:", candidateString);
+
+                        peerConnection.addIceCandidate(
+                            new RTCIceCandidate({
+                                candidate: candidateString,
+                                sdpMid: "0",
+                                sdpMLineIndex: 0,
+                            })
+                        )
+                    });
+
+                    // with for ice gathering
+                    await waitForIceGatheringComplete(peerConnection);
+
+                    // send answer and ice candidates
+                    await sendAnswer(peerConnection.localDescription.sdp, peerid);
+
+                    console.log("WebRTC Protocol Finished!");
+                } catch (error) {
+                    console.error("Error during WebRTC setup:", error);
+                }
+            }
+
+            // Run the test
+            await testWebRTC();
+        })();
+    </script>
+</body>
+</html>
