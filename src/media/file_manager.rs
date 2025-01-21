@@ -12,6 +12,8 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use sqlx::PgPool;
 use dotenvy::dotenv;
 use std::env;
+
+use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::{config::Region, Client};
 
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
@@ -29,6 +31,7 @@ pub struct FMDownloadParams{
 pub struct FileManager {
     pub semaphore: Arc<Semaphore>,
     pub max_file_size: u64,
+    pub s3_client: Client,
 }
 
 impl FileManager {
@@ -42,12 +45,18 @@ impl FileManager {
 
         let semaphore = Arc::new(Semaphore::new(max_concurrent_downloads));
 
+        let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"));
+        let region = region_provider.region().await.unwrap();
+        let shared_config = aws_config::from_env().region(region_provider).load().await;
+        let client = Client::new(&shared_config);
+
         Ok(Self {
             semaphore,
             max_file_size: env::var("MAX_FILE_SIZE")
                 .unwrap_or("100000000".to_string())
                 .parse::<u64>()
                 .expect("MAX_FILE_SIZE must be a number"),
+            s3_client: client,
         })
     }
 
@@ -75,7 +84,7 @@ impl FileManager {
             .arg("--flat-playlist")
             .arg("--dump-single-json")
             .arg("--playlist-end")
-            .arg("20")
+            .arg(env::var("MAX_PLAYLIST_SIZE").unwrap_or("20".to_string()))
             .arg(url.clone())
             .output().await?;
 
@@ -105,30 +114,16 @@ impl FileManager {
         }
     }
 
-    pub async fn process_audio(&self, params: FMDownloadParams) -> 
-        Result<task::JoinHandle<Result<()>>> 
-    {
+    pub async fn process_audio(&self, params: FMDownloadParams) -> Result<()> {
 
         let sem_clone = self.semaphore.clone();
-        let url = params.url.clone();
+        let _permit = sem_clone.acquire().await.unwrap();
+        self._process_audio(params).await?;
 
-        let handle = task::spawn(async move {
-            let _permit = sem_clone.acquire().await.unwrap();
-            match FileManager::_process_audio(params).await {
-                Ok(_) => {
-                    Ok(())
-                }
-
-                Err(e) => {
-                    return Err(e);
-                }
-            }
-        });
-
-        Ok(handle)
+        Ok(())
     }
 
-    pub async fn _process_audio(params: FMDownloadParams) -> Result<()> {
+    pub async fn _process_audio(&self, params: FMDownloadParams) -> Result<()> {
 
         let url = params.url.clone();
         let title = params.title.clone();
@@ -198,9 +193,22 @@ impl FileManager {
         }
 
         // upload the file to s3
+        let body = aws_sdk_s3::primitives::ByteStream::from_path(
+            format!("{}/{}.ogg", converted_dir, uuid)
+        ).await.unwrap();
+
+        self.s3_client
+            .put_object()
+            .bucket("antaresmusicshare")
+            .key(format!("{}.ogg", uuid))
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| Error::UploadFailed { msg: e.to_string() })?;
+
 
         // delete the files in convert
-
+        tokio::fs::remove_file(format!("{}/{}.ogg", converted_dir, uuid)).await?;
 
         // store the metadata in the database
         match sqlx::query(

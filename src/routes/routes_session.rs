@@ -233,7 +233,7 @@ async fn download(
 
     let fm = mc.get_file_manager().await?;
 
-    let join_handle = fm.process_audio(
+    fm.process_audio(
         FMDownloadParams {
             url: body.url.clone(),
             title: body.title.clone(),
@@ -242,7 +242,6 @@ async fn download(
         }
     ).await?;
 
-    join_handle.await;
 
     Ok(Json(json!({
         "status": "ok",

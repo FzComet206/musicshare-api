@@ -24,6 +24,7 @@ pub enum Error {
     DownloadFailed { url: String },
     ConversionFailed { url: String },
     DatabaseWriteError { msg: String },
+    UploadFailed { msg: String },
 }
 
 impl IntoResponse for Error {
@@ -47,7 +48,7 @@ impl From<webrtc::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(_err: std::io::Error) -> Self {
         Error::AudioDownloadDirError {
-            source: "Failed to create audio download directory".to_string(),
+            source: format!("{:?}", _err),
         }
     }
 }
