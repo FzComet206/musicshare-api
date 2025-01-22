@@ -197,6 +197,8 @@ impl FileManager {
             format!("{}/{}.ogg", converted_dir, uuid)
         ).await.unwrap();
 
+        // if upload failed, also remove the files
+
         self.s3_client
             .put_object()
             .bucket("antaresmusicshare")
@@ -204,8 +206,14 @@ impl FileManager {
             .body(body)
             .send()
             .await
-            .map_err(|e| Error::UploadFailed { msg: e.to_string() })?;
-
+            .map_err(
+                // delete files if upload failed
+                |e| {
+                    tokio::fs::remove_file(format!("{}/{}.mp3", output_dir, uuid));
+                    tokio::fs::remove_file(format!("{}/{}.ogg", converted_dir, uuid));
+                    Error::UploadFailed { msg: e.to_string() }
+                }
+            )?;
 
         // delete the files in convert
         tokio::fs::remove_file(format!("{}/{}.ogg", converted_dir, uuid)).await?;
@@ -241,6 +249,8 @@ impl FileManager {
             .arg(url.clone())
             .output()
             .await?;
+
+        println!("Output: {:?}", output);
         
         if !output.status.success() {
             return Err(Error::InvalidURL {url: url.to_string()});

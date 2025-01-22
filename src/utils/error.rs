@@ -10,7 +10,7 @@ pub enum Error {
     WebRTCErr { source: String },
     PeerConnectionNotFound { peerid: String },
     LocalDescriptionMissing,
-    AudioDownloadDirError { source: String },
+    StdIoError { source: String },
     FileTooLarge { size: u64, limit: u64 },
     InvalidURL { url: String },
     LiveStreamNotSupported { url: String },
@@ -48,7 +48,7 @@ impl From<webrtc::Error> for Error {
 
 impl From<std::io::Error> for Error {
     fn from(_err: std::io::Error) -> Self {
-        Error::AudioDownloadDirError {
+        Error::StdIoError {
             source: format!("{:?}", _err),
         }
     }
