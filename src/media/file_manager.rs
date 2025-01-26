@@ -16,6 +16,10 @@ use std::env;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::{config::Region, Client};
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Mutex;
+use std::collections::HashSet;
+
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
 const FFMPEG_PATH: &str = "./libs/ffmpeg";
 
@@ -26,12 +30,12 @@ pub struct FMDownloadParams{
     pub pool: PgPool,
 }
 
-
 #[derive(Clone, Debug)]
 pub struct FileManager {
     pub semaphore: Arc<Semaphore>,
     pub max_file_size: u64,
     pub s3_client: Client,
+    pub processing_clients: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl FileManager {
@@ -57,6 +61,7 @@ impl FileManager {
                 .parse::<u64>()
                 .expect("MAX_FILE_SIZE must be a number"),
             s3_client: client,
+            processing_clients: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -118,6 +123,7 @@ impl FileManager {
 
         let sem_clone = self.semaphore.clone();
         let _permit = sem_clone.acquire().await.unwrap();
+
         self._process_audio(params).await?;
 
         Ok(())
@@ -352,5 +358,25 @@ impl FileManager {
             return Err(Error::PlayListParseErr { msg: stderr.to_string() });
         }
         Ok(())
+    }
+
+    pub async fn set_processing_client(&self, id: u64) -> Result<()> {
+        // add id to the processing list
+        let mut processing_clients = self.processing_clients.lock().await;
+        processing_clients.insert(id);
+        Ok(())
+    }
+
+    pub async fn remove_processing_client(&self, id: u64) -> Result<()> {
+        // remove id from the processing list
+        let mut processing_clients = self.processing_clients.lock().await;
+        processing_clients.remove(&id);
+        Ok(())
+    }
+
+    pub async fn client_is_processing(&self, id: u64) -> bool {
+        // return true if id is in the processing list
+        let processing_clients = self.processing_clients.lock().await;
+        processing_clients.contains(&id)
     }
 }

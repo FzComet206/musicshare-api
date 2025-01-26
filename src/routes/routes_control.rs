@@ -19,6 +19,8 @@ use axum::routing::post;
 use axum::extract::State;
 use axum::Extension;
 use sqlx::PgPool;
+use serde_json::{json, Value};
+use axum::{Json};
 
 use crate::utils::error::{ Error, Result };
 use crate::models::SessionController;
@@ -35,11 +37,16 @@ async fn test_auth(
     State(mc): State<Arc<SessionController>>,
     Extension(pool) : Extension<PgPool>,
     ctx: Ctx,
-) -> Result<()> {
+) -> Result<Json<Value>> {
 
     let id = ctx.id();
     let name = ctx.name();
     let picture = ctx.picture();
     println!("->> test_auth id: {}, name: {}", id, name);
-    Ok(())
+
+    Ok(Json(json!({
+        "id": id,
+        "name": name,
+        "picture": picture,
+    })))
 }

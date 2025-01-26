@@ -16,6 +16,7 @@ use crate::utils::error::{ Error, Result };
 use crate::middlewares::AUTH_TOKEN;
 use crate::ctx::Ctx;
 use crate::models::SessionController;
+use tower_cookies::{Cookie, Cookies};
 
 pub async fn mw_require_auth<B>(
     ctx: Result<Ctx>,
@@ -30,19 +31,21 @@ pub async fn mw_require_auth<B>(
 
 pub async fn mw_ctx_resolver<B>(
     State(mc): State<Arc<SessionController>>,
+    cookies: Cookies,
     Extension(pool) : Extension<PgPool>,
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response> {
 
     // this middleware layers handles authentications and insert into request body
-
     println!("->> {:12} - ctx_resolver", "Middleware");
-
-    let auth_token = req.headers().get(AUTH_TOKEN)
-        .map(|value| value.to_str().unwrap().to_string())
-        .ok_or(Error::AuthFailNoToken)?;
     
+    // get the cookie named google_access_token
+    let auth_token = match cookies.get(AUTH_TOKEN) {
+        Some(cookie) => cookie.value().to_string(),
+        None => return Err(Error::AuthFailNoToken),
+    };
+
     let client = reqwest::Client::new();
 
     let response = client.get("https://www.googleapis.com/userinfo/v2/me")

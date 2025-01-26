@@ -25,13 +25,16 @@ use webrtc::media::{
 };
 use std::fs::File;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 const OGG_PAGE_DURATION: Duration = Duration::from_millis(20);
 
 
 #[derive(Clone, Debug)]
 pub struct Broadcaster {
     pub audio_track: Arc<TrackLocalStaticSample>,
-    // pub is_broadcasting: Arc<Mutex<bool>>, 
+    is_broadcasting: Arc<AtomicBool>,
+    is_paused: Arc<AtomicBool>,
 }
 
 impl Broadcaster {
@@ -50,7 +53,8 @@ impl Broadcaster {
 
         Ok(Self {
             audio_track: track,
-            // is_broadcasting: Arc::new(Mutex::new(false)),
+            is_broadcasting: Arc::new(AtomicBool::new(false)),
+            is_paused: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -62,10 +66,16 @@ impl Broadcaster {
 
     pub async fn broadcast_audio_from_file(&self, file_path: &str) -> Result<()> {
 
+        // upon function call, set the is_broadcasting flag to true
+        self.is_broadcasting.store(true, Ordering::Release);
+
         let file_name = file_path.to_owned();
         let audio_track = self.audio_track.clone();
 
-        tokio::spawn(async move {
+        let is_broadcasting = self.is_broadcasting.clone();
+        let is_paused = self.is_paused.clone();
+
+        let handle = tokio::spawn(async move {
             let file = File::open(file_name).unwrap();
             let reader = BufReader::new(file);
             let (mut ogg, _) = OggReader::new(reader, true).unwrap();
@@ -74,6 +84,15 @@ impl Broadcaster {
 
             let mut last_granule: u64 = 0;
             while let Ok((page_data, page_header)) = ogg.parse_next_page() {
+
+                if is_broadcasting.load(Ordering::Acquire) == false {
+                    break;
+                }
+
+                if is_paused.load(Ordering::Acquire) == true {
+                    let _ = ticker.tick().await;
+                    continue;
+                }
 
                 let sample_count = page_header.granule_position - last_granule;
                 last_granule = page_header.granule_position;
@@ -94,8 +113,16 @@ impl Broadcaster {
         Ok(())
     }
 
-    // pub async fn stop_broadcast(&self) {
-        // let mut broadcasting = self.is_broadcasting.lock().await;
-        // *broadcasting = false;
-    // }
+
+    pub async fn stop(&self) {
+        self.is_broadcasting.store(false, Ordering::Release);
+    }
+
+    pub async fn pause(&self) {
+        self.is_paused.store(true, Ordering::Release);
+    }
+
+    pub async fn resume(&self) {
+        self.is_paused.store(false, Ordering::Release);
+    }
 }

@@ -212,7 +212,13 @@ async fn download(
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - download", "Handler");
 
-    mc.process_audio(
+    // look up if the url is in db, if not, download
+
+    // has to call fm.process_audio directly instead of wrapping
+    // the function with session controller to ensure concurrent downloads
+    let fm = mc.get_file_manager().await?;
+
+    fm.process_audio(
         FMDownloadParams {
             url: body.url.clone(),
             title: body.title.clone(),

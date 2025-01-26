@@ -22,6 +22,8 @@ use tower_cookies::CookieManagerLayer;
 
 use tokio::runtime::Builder;
 
+use reqwest::header::HeaderValue;
+
 // handles api routes
 mod routes;
 // handles server state and relevant struct
@@ -52,9 +54,11 @@ async fn main() -> Result<()> {
 
     // joining routes 
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(
+            "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+        )
         .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
-        .allow_headers(Any);
+        .allow_credentials(true);
 
     // auth required routes
     let routes_control = routes::routes_control::routes(mc.clone())
@@ -69,14 +73,15 @@ async fn main() -> Result<()> {
             mc.clone(),
             middlewares::mw::mw_ctx_resolver,
         ))
+        .layer(CookieManagerLayer::new())
         .nest("/session", routes_session)
         .layer(middleware::map_response(main_response_mapper))
         .layer(Extension(pool))
         .layer(cors)
         .fallback_service(routes_static());
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("->> Server listening on port 3000");
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+    println!("->> Server listening on port 8000");
     println!("");
     println!("");
 

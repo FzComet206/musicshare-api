@@ -114,21 +114,6 @@ impl Session {
         Ok(peers)
     }
 
-    // handles playback update when the first item of the queue is effected
-    pub async fn on_queue_change_effect(&self, key: String) -> Result<()> {
-        Ok(())
-        // downlaod the file with key into session folder
-
-        // stop the broadcasting now and start new broadcasting with key
-    }
-
-    pub async fn on_broadcasting_end(&self) -> Result<()> {
-        Ok(())
-        // remove the first item from the queue
-        // if there are more items in the queue
-        // start braodcasting with the next item
-    }
-
     pub async fn get_queue(&self) -> Result<Vec<Vec<String>>> {
         let queue = self.queue.lock().await;
         Ok(queue.get_all())
@@ -139,7 +124,6 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.add(key, title, url) {
             Next(key) => {
-                // handle the first item in the queue
                 todo!()
             },
             Pass => (),
@@ -152,11 +136,9 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.remove(key) {
             Next(key) => {
-                // handle the next item in the queue
                 todo!()
             },
             Stop => {
-                // handle the end of the queue
                 todo!()
             },
             NotFound => {
@@ -233,12 +215,5 @@ impl SessionController{
         let file_manager = self.file_manager.lock().await;
         Ok(file_manager.clone())
     }
-
-    pub async fn process_audio(&self, params: FMDownloadParams) -> Result<()> {
-        let file_manager = self.file_manager.lock().await;
-        file_manager.process_audio(params).await?;
-        Ok(())
-    }
-    
 }
 
