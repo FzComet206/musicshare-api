@@ -6,7 +6,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub enum Error {
     LoginFail,
     SessionDeleteFailIdNotFound { id: u64 },
-    SessionNotFound { id: u64 },
+    SessionNotFound { id: String },
     WebRTCErr { source: String },
     PeerConnectionNotFound { peerid: String },
     LocalDescriptionMissing,

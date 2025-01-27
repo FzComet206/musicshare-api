@@ -124,11 +124,13 @@ impl FileManager {
     pub async fn process_audio(&self, params: FMDownloadParams) -> Result<()> {
 
         let url = params.url.clone();
+        let user_id = params.userid.clone().parse::<i32>().unwrap();
         // check if url is in db
         match sqlx::query(
-            "SELECT * FROM files WHERE url = $1"
+            "SELECT * FROM files WHERE url = $1 AND user_id = $2"
         )
         .bind(url.clone())
+        .bind(user_id)
         .fetch_all(&params.pool)
         .await {
             Ok(files) => {

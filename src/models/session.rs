@@ -190,7 +190,7 @@ impl SessionController{
         })
     }
 
-    pub async fn create_session(&self) -> Result<(Session)> {
+    pub async fn create_session(&self) -> Result<(String)> {
 
         println!("->> {:<12} - create_session", "Controller");
 
@@ -200,10 +200,10 @@ impl SessionController{
         let uuid = uuid::Uuid::new_v4().to_string();
         sessions.insert(uuid.clone(), Some(session.clone()));
 
-        Ok(session)
+        Ok(uuid)
     }
 
-    pub async fn get_session(&self, id: u64) -> Result<Session> {
+    pub async fn get_session(&self, id: String) -> Result<Session> {
         let sessions = self.sessions.lock().await;
         let session = sessions.get(&id.to_string()).and_then(|f| f.clone());
         session.ok_or(Error::SessionNotFound { id })

@@ -55,7 +55,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/test", post(test_auth))
         .route("/get_metadata", post(get_metadata))
         .route("/download", post(download))
-        .route("/create_session", post(create_session))
+        .route("/create_session", get(create_session))
         .route("/get_files", get(get_files))
         .route("/download_notify", get(download_notify))
         .with_state(mc)
@@ -84,11 +84,11 @@ async fn create_session(
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - create_session", "Handler");
 
-    let mut session = mc.create_session().await?;
+    let mut sessionid = mc.create_session().await?;
     
     Ok(Json(json!({
         "status": "ok",
-        "message": "Session created",
+        "session_id": sessionid
     })))
 }
 

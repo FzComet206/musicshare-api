@@ -51,21 +51,14 @@ async fn main() -> Result<()> {
 
     // initialize session controller
     let mc = Arc::new(SessionController::new().await?);
-    mc.create_session().await?;
     let pool = db::establish_connection().await?;
 
-    // let cors = CorsLayer::new()
-        // .allow_origin(AllowOrigin::mirror_request())
-        // .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
-        // .allow_headers([reqwest::header::CONTENT_TYPE, reqwest::header::AUTHORIZATION])
-        // .allow_credentials(true);
     let api_cors = CorsLayer::new()
         .allow_origin(AllowOrigin::mirror_request())
         .allow_methods([Method::OPTIONS, Method::GET, Method::POST, Method::DELETE, Method::PUT])
         .allow_headers([reqwest::header::CONTENT_TYPE, reqwest::header::AUTHORIZATION])
         .allow_credentials(true);
 
-    // auth required routes
     let routes_control = routes::routes_control::routes(mc.clone())
         .route_layer(middleware::from_fn(middlewares::mw::mw_require_auth));
 

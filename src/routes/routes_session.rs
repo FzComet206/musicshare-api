@@ -53,6 +53,11 @@ struct GetIceRequest {
     peerid: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct SessionID {
+    session_id: String,
+}
+
 
 // this is a no auth route layer
 
@@ -96,12 +101,13 @@ async fn server_state(
 
 async fn get_offer(
     State(mc): State<Arc<SessionController>>,
+    Query(params): Query<SessionID>,
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - join_session", "Handler");
 
     // in final impl, this should have request payload of session uuid
 
-    let mut session = mc.get_session(0).await?;
+    let mut session = mc.get_session(params.session_id).await?;
     // let offer = session.get_offer("hi".to_string()).await?;
     let mut uuid = session.create_peer().await?;
     let id = uuid.clone();
@@ -117,12 +123,13 @@ async fn get_offer(
 
 async fn set_answer(
     // get request body
+    Query(params): Query<SessionID>,
     State(mc): State<Arc<SessionController>>,
     Json(body): Json<SDPAnswerRequest>,
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - set_answer", "Handler");
 
-    let session = mc.get_session(0).await?;
+    let mut session = mc.get_session(params.session_id).await?;
 
     session.set_answer(body.sdp, body.peerid).await?;
 
@@ -133,12 +140,13 @@ async fn set_answer(
 }
 
 async fn get_ice(
+    Query(params): Query<SessionID>,
     State(mc): State<Arc<SessionController>>,
     Json(body): Json<GetIceRequest>,
 ) -> Result<Json<Vec<RTCIceCandidate>>> {
     println!("->> {:<12} - get_ice", "Handler");
 
-    let session = mc.get_session(0).await?;
+    let mut session = mc.get_session(params.session_id).await?;
 
     let candidates = session.get_ice(body.peerid).await?.clone();
 
@@ -146,12 +154,13 @@ async fn get_ice(
 }
 
 async fn add_ice(
+    Query(params): Query<SessionID>,
     State(mc): State<Arc<SessionController>>,
     Json(body): Json<ICECandidateRequest>,
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - add_ice_candidate", "Handler");
 
-    let session = mc.get_session(0).await?;
+    let mut session = mc.get_session(params.session_id).await?;
 
     let candidate = RTCIceCandidateInit {
         candidate: body.candidate,
