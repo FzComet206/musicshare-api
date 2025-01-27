@@ -73,8 +73,8 @@ pub async fn mw_ctx_resolver<B>(
                         row.iter().for_each(|row| {
                             let name: String = row.get("name");
                             let picture: String = row.get("picture");
-                            let sub: String = row.get("sub");
-                            let result_ctx: Result<Ctx> = Ok(Ctx::new(sub, name, picture));
+                            let userid: i32 = row.get("user_id");
+                            let result_ctx: Result<Ctx> = Ok(Ctx::new(userid.to_string(), name, picture));
                             req.extensions_mut().insert(result_ctx);
                         });
                     }
@@ -82,7 +82,8 @@ pub async fn mw_ctx_resolver<B>(
                         match sqlx::query(
                             "INSERT INTO 
                                 users (oauth_type, sub, name, picture) 
-                                VALUES ('google', $1, $2, $3)"
+                                VALUES ('google', $1, $2, $3)
+                                "
                             )
                             .bind(id)
                             .bind(name)
@@ -90,8 +91,21 @@ pub async fn mw_ctx_resolver<B>(
                             .execute(&pool)
                             .await {
                                 Ok(_) => {
-                                    let result_ctx: Result<Ctx> = Ok(Ctx::new(id.to_string(), name.to_string(), picture.to_string()));
-                                    req.extensions_mut().insert(result_ctx);
+                                    match sqlx::query("SELECT * FROM users WHERE sub = $1")
+                                        .bind(id)
+                                        .fetch_all(&pool)
+                                        .await {
+                                            Ok(row) => {
+                                                row.iter().for_each(|row| {
+                                                    let name: String = row.get("name");
+                                                    let picture: String = row.get("picture");
+                                                    let userid: String = row.get("user_id");
+                                                    let result_ctx: Result<Ctx> = Ok(Ctx::new(userid, name, picture));
+                                                    req.extensions_mut().insert(result_ctx);
+                                                });
+                                            }
+                                            Err(e) => return Err(Error::DBError { source: format!("{:?}", e) }),
+                                        };
                                 }
                                 Err(e) => return Err(Error::DBError { source: format!("{:?}", e) }),
                         };

@@ -17,12 +17,14 @@ use models::SessionController;
 use axum::http::Method;
 use std::sync::Arc;
 
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{Any, CorsLayer, AllowOrigin, AllowHeaders, AllowMethods};
 use tower_cookies::CookieManagerLayer;
 
 use tokio::runtime::Builder;
 
 use reqwest::header::HeaderValue;
+use tower::ServiceBuilder;
+
 
 // handles api routes
 mod routes;
@@ -52,17 +54,21 @@ async fn main() -> Result<()> {
     mc.create_session().await?;
     let pool = db::establish_connection().await?;
 
-    // joining routes 
-    let cors = CorsLayer::new()
-        .allow_origin(
-            "http://localhost:3000".parse::<HeaderValue>().unwrap(),
-        )
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
+    // let cors = CorsLayer::new()
+        // .allow_origin(AllowOrigin::mirror_request())
+        // .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
+        // .allow_headers([reqwest::header::CONTENT_TYPE, reqwest::header::AUTHORIZATION])
+        // .allow_credentials(true);
+    let api_cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::mirror_request())
+        .allow_methods([Method::OPTIONS, Method::GET, Method::POST, Method::DELETE, Method::PUT])
+        .allow_headers([reqwest::header::CONTENT_TYPE, reqwest::header::AUTHORIZATION])
         .allow_credentials(true);
 
     // auth required routes
     let routes_control = routes::routes_control::routes(mc.clone())
         .route_layer(middleware::from_fn(middlewares::mw::mw_require_auth));
+
     let routes_session = routes::routes_session::routes(mc.clone());
 
     let main_router = Router::new()
@@ -77,7 +83,7 @@ async fn main() -> Result<()> {
         .nest("/session", routes_session)
         .layer(middleware::map_response(main_response_mapper))
         .layer(Extension(pool))
-        .layer(cors)
+        .layer(api_cors)
         .fallback_service(routes_static());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));

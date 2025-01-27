@@ -10,6 +10,7 @@ use tokio::sync::Semaphore;
 use tokio::task;
 use futures::stream::{FuturesUnordered, StreamExt};
 use sqlx::PgPool;
+use sqlx::Row;
 use dotenvy::dotenv;
 use std::env;
 
@@ -18,7 +19,8 @@ use aws_sdk_s3::{config::Region, Client};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
-use std::collections::HashSet;
+use tokio::sync::broadcast;
+use std::collections::HashMap;
 
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
 const FFMPEG_PATH: &str = "./libs/ffmpeg";
@@ -26,7 +28,7 @@ const FFMPEG_PATH: &str = "./libs/ffmpeg";
 pub struct FMDownloadParams{
     pub url: String,
     pub title: String,
-    pub userid: u64,
+    pub userid: String,
     pub pool: PgPool,
 }
 
@@ -35,7 +37,7 @@ pub struct FileManager {
     pub semaphore: Arc<Semaphore>,
     pub max_file_size: u64,
     pub s3_client: Client,
-    pub processing_clients: Arc<Mutex<HashSet<u64>>>,
+    pub processing_user: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
 }
 
 impl FileManager {
@@ -61,7 +63,7 @@ impl FileManager {
                 .parse::<u64>()
                 .expect("MAX_FILE_SIZE must be a number"),
             s3_client: client,
-            processing_clients: Arc::new(Mutex::new(HashSet::new())),
+            processing_user: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -121,6 +123,26 @@ impl FileManager {
 
     pub async fn process_audio(&self, params: FMDownloadParams) -> Result<()> {
 
+        let url = params.url.clone();
+        // check if url is in db
+        match sqlx::query(
+            "SELECT * FROM files WHERE url = $1"
+        )
+        .bind(url.clone())
+        .fetch_all(&params.pool)
+        .await {
+            Ok(files) => {
+                if files.len() > 0 {
+                    let sender = self.get_sender_with_id(params.userid.clone()).await?;
+                    sender.send(params.title.clone()).unwrap_or(0);
+                    return Err(Error::DuplicateContent { msg: url.to_string() });
+                }
+            }
+            Err(e) => {
+                return Err(Error::DBError { source: e.to_string() });
+            }
+        }
+
         let sem_clone = self.semaphore.clone();
         let _permit = sem_clone.acquire().await.unwrap();
 
@@ -133,7 +155,7 @@ impl FileManager {
 
         let url = params.url.clone();
         let title = params.title.clone();
-        let userid = params.userid.clone();
+        let userid: i32 = params.userid.clone().parse::<i32>().unwrap();
         let pool = params.pool.clone();
         let uuid = uuid::Uuid::new_v4().to_string();
 
@@ -224,13 +246,12 @@ impl FileManager {
         // delete the files in convert
         tokio::fs::remove_file(format!("{}/{}.ogg", converted_dir, uuid)).await?;
 
-        // store the metadata in the database
         match sqlx::query(
             "
             INSERT INTO files (user_id, url, uuid, name)
             VALUES ($1, $2, $3, $4)
             ")
-            .bind(userid as i64)
+            .bind(userid)
             .bind(url)
             .bind(uuid.clone())
             .bind(title)
@@ -242,6 +263,10 @@ impl FileManager {
                     return Err(Error::DatabaseWriteError { msg: e.to_string() });
                 }
             }
+        
+        let sender = self.get_sender_with_id(params.userid.clone()).await?;
+        sender.send("check".to_string()).unwrap_or(0);
+        println!("Sent finished message to userid {}", params.userid.clone());
 
         Ok(())
     }
@@ -360,23 +385,17 @@ impl FileManager {
         Ok(())
     }
 
-    pub async fn set_processing_client(&self, id: u64) -> Result<()> {
-        // add id to the processing list
-        let mut processing_clients = self.processing_clients.lock().await;
-        processing_clients.insert(id);
-        Ok(())
+    pub async fn get_sender_with_id(&self, id: String) -> Result<broadcast::Sender<String>> {
+        let mut processing_user = self.processing_user.lock().await;
+        let sender = processing_user.get(&id)
+            .map(|f| f.clone()).unwrap();
+        
+        Ok(sender)
     }
 
-    pub async fn remove_processing_client(&self, id: u64) -> Result<()> {
-        // remove id from the processing list
-        let mut processing_clients = self.processing_clients.lock().await;
-        processing_clients.remove(&id);
+    pub async fn add_sender_with_id(&self, id: String, sender: broadcast::Sender<String>) -> Result<()> {
+        let mut processing_user = self.processing_user.lock().await;
+        processing_user.insert(id, sender);
         Ok(())
-    }
-
-    pub async fn client_is_processing(&self, id: u64) -> bool {
-        // return true if id is in the processing list
-        let processing_clients = self.processing_clients.lock().await;
-        processing_clients.contains(&id)
     }
 }

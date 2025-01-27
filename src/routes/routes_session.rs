@@ -25,7 +25,6 @@ use webrtc::ice_transport::ice_candidate::{
     RTCIceCandidate,
 };
 
-use crate::media::file_manager::{ FileManager, FMDownloadParams};
 use axum::Extension;
 use sqlx::PgPool;
 
@@ -54,16 +53,6 @@ struct GetIceRequest {
     peerid: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct PlayTestRequest {
-    url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct DownloadRequest {
-    url: String,
-    title: String,
-}
 
 // this is a no auth route layer
 
@@ -74,8 +63,6 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/get_ice", post(get_ice))
         .route("/set_ice", post(add_ice))
         .route("/state", get(server_state))
-        .route("/get_metadata", post(get_metadata))
-        .route("/download", post(download))
         .with_state(mc)
 }
 
@@ -190,77 +177,3 @@ async fn add_ice(
 // exit session
 // get participants
 // get queue
-
-async fn create_session(
-    State(mc): State<Arc<SessionController>>,
-) -> Result<Json<Value>> {
-    println!("->> {:<12} - create_session", "Handler");
-
-    let mut session = mc.create_session().await?;
-    
-    Ok(Json(json!({
-        "status": "ok",
-        "message": "Session created",
-    })))
-}
-
-
-async fn download(
-    State(mc): State<Arc<SessionController>>,
-    Extension(pool): Extension<PgPool>,
-    Json(body): Json<DownloadRequest>,
-) -> Result<Json<Value>> {
-    println!("->> {:<12} - download", "Handler");
-
-    // look up if the url is in db, if not, download
-
-    // has to call fm.process_audio directly instead of wrapping
-    // the function with session controller to ensure concurrent downloads
-    let fm = mc.get_file_manager().await?;
-
-    fm.process_audio(
-        FMDownloadParams {
-            url: body.url.clone(),
-            title: body.title.clone(),
-            userid: 1,
-            pool: pool.clone(),
-        }
-    ).await?;
-
-
-    Ok(Json(json!({
-        "status": "ok",
-        "message": "Downloading",
-    })))
-}
-
-async fn get_metadata(
-    State(mc): State<Arc<SessionController>>,
-    Extension(pool): Extension<PgPool>,
-    Json(body): Json<PlayTestRequest>,
-) -> Result<Json<Value>> {
-    println!("->> {:<12} - get_metadata", "Handler");
-
-    let is_playlist = body.url.contains("playlist") || body.url.contains("list");
-
-    if is_playlist {
-        let list = FileManager::get_list(body.url.clone()).await?;
-        Ok(Json(json!({
-            "status": "ok",
-            "list": list,
-        })))
-    } else {
-        if FileManager::is_live(body.url.clone()).await? {
-            Ok(Json(json!({
-                "status": "ok",
-                "message": "Live stream is not supported",
-            })))
-        } else {
-            let result = FileManager::get_title(body.url.clone()).await?; 
-            Ok(Json(json!({
-                "status": "ok",
-                "list": result,
-            })))
-        }
-    }
-}

@@ -24,6 +24,7 @@ use webrtc::ice_transport::ice_candidate::{
 };
 use webrtc::ice_transport::ice_gatherer_state::RTCIceGathererState;
 
+use tokio::sync::broadcast;
 use std::collections::HashMap;
 use crate::media::file_manager::{ FileManager, FMDownloadParams };
 use crate::models::queue::PlayQueue;
@@ -37,6 +38,7 @@ pub struct Session {
     pub peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     pub broadcaster: Broadcaster,
     pub queue: Arc<Mutex<PlayQueue>>,
+    pub update: Arc<Mutex<broadcast::Sender<String>>>,
 } 
 
 impl Session {
@@ -50,6 +52,7 @@ impl Session {
             peer_connections: Arc::new(Mutex::new(HashMap::new())),
             broadcaster: broadcaster,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
+            update: Arc::new(Mutex::new(broadcast::channel(10).0)),
         })
     }
 
@@ -214,6 +217,17 @@ impl SessionController{
     pub async fn get_file_manager(&self) -> Result<FileManager> {
         let file_manager = self.file_manager.lock().await;
         Ok(file_manager.clone())
+    }
+
+    pub async fn get_sender_with_id(&self, id: String) -> Result<broadcast::Sender<String>> {
+        let file_manager = self.file_manager.lock().await;
+        Ok(file_manager.get_sender_with_id(id).await?)
+    }
+
+    pub async fn add_sender_with_id(&self, id: String, sender: broadcast::Sender<String>) -> Result<()> {
+        let mut file_manager = self.file_manager.lock().await;
+        file_manager.add_sender_with_id(id, sender).await?;
+        Ok(())
     }
 }
 

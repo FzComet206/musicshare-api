@@ -166,21 +166,6 @@
                         } 
                     };
 
-
-                    // peerConnection.ontrack = (event) => {
-                        // const audio = new Audio();
-                        // audio.srcObject = event.streams[0];
-                        // audio.autoplay = true;
-                        // audio.controls = true;
-                        // document.body.appendChild(audio);
-
-                        // console.log("Stream:", audio.srcObject);
-                        // console.log("track is enabled: ", event.track.enabled);
-                        // console.log("track is muted:", event.track.muted);
-                    // };
-
-
-
                     // get offer
                     const { offer, peerid } = await getOffer();
                     await peerConnection.setRemoteDescription(
@@ -223,7 +208,6 @@
                     console.error("Error during WebRTC setup:", error);
                 }
             }
-
             // Run the test
             await testWebRTC();
         })();

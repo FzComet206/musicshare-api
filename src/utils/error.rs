@@ -26,6 +26,7 @@ pub enum Error {
     DatabaseWriteError { msg: String },
     UploadFailed { msg: String },
     QueueError { msg: String },
+    DuplicateContent { msg: String },
 }
 
 impl IntoResponse for Error {
