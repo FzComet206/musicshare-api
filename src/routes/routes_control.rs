@@ -44,6 +44,12 @@ struct AddQueue {
     title: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct RemoveQueue {
+    session_id: String,
+    key: String,
+}
+
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
         .route("/test", post(test_auth))
@@ -53,6 +59,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/get_files", get(get_files))
         .route("/download_notify", get(download_notify))
         .route("/add_to_queue", post(add_to_queue))
+        .route("/remove_from_queue", post(remove_from_queue))
         .with_state(mc)
 }
 
@@ -243,3 +250,21 @@ async fn add_to_queue(
         "message": "Download initiated",
     })))
 }
+
+async fn remove_from_queue(
+    State(mc): State<Arc<SessionController>>,
+    Json(body): Json<RemoveQueue>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - remove_from_queue", "Handler");
+
+    let key = body.key.clone();
+    let session_id = body.session_id.clone();
+    let session = mc.get_session(session_id).await?;
+
+    session.remove_from_queue(key).await?;
+    
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Removed",
+    }))
+)}

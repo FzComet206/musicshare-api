@@ -199,6 +199,8 @@ impl Session {
         if !Path::new(&session_dir).exists() {
             tokio::fs::create_dir_all(session_dir.clone()).await?;
         }
+
+        // if there are any files left in session_dir, delete them
         
         let file_dir = format!("{}/{}.ogg", session_dir, key);
 
