@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::path::Path;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
+use tokio::fs;
 
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::media_engine::MIME_TYPE_VP8;
@@ -157,16 +158,18 @@ impl Session {
         match queue.remove(key) {
             Next(key) => {
                 self.set_active_file(key).await?;
+                self.ping().await?;
             },
             Stop => {
-                todo!()
+                self.clean_actve_file().await?;
+                self.broadcaster.stop().await;
+                self.ping().await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
             },
-            Pass => ()
+            Pass => { self.ping().await?; }
         }
-        self.ping().await?;
         Ok(())
     }
 
@@ -191,6 +194,7 @@ impl Session {
         // sets the active file for broadcaster to play
 
         // genenerate a session directory in ./sessions/session_id
+        self.broadcaster.stop().await;
 
         let session_id = self.uuid.clone();
         let session_dir = format!("./sessions/{}", session_id.clone());
@@ -201,6 +205,18 @@ impl Session {
         }
 
         // if there are any files left in session_dir, delete them
+        let mut entries = match fs::read_dir(session_dir.clone()).await {
+            Ok(entries) => entries,
+            Err(e) => return Err(Error::ResetFileError { msg: e.to_string() }),
+        };
+
+        while let Some(entry) = entries.next_entry().await.transpose() {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                fs::remove_file(path).await?;
+            }
+        }
         
         let file_dir = format!("{}/{}.ogg", session_dir, key);
 
@@ -241,7 +257,20 @@ impl Session {
     }
 
     pub async fn clean_actve_file(&self) -> Result<()> {
-        // cleans the active files in session directory
+
+        let session_dir = format!("./sessions/{}", self.uuid.clone());
+        let mut entries = match fs::read_dir(session_dir.clone()).await {
+            Ok(entries) => entries,
+            Err(e) => return Err(Error::ResetFileError { msg: e.to_string() }),
+        };
+
+        while let Some(entry) = entries.next_entry().await.transpose() {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                fs::remove_file(path).await?;
+            }
+        }
         Ok(())
     }
 

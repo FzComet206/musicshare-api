@@ -48,14 +48,17 @@ impl PlayQueue {
         let index = self.queue.iter().position(|x| x[0] == key);
         match index {
             Some(i) => {
-                self.queue.remove(i);
                 if i == 0 {
-                    if self.queue.len() > 0 {
+                    if self.queue.len() > 1 {
+                        self.queue.remove(i);
                         return QueueAction::Next(self.queue[0][0].clone());
                     } else {
+                        self.queue.remove(i);
                         return QueueAction::Stop
                     }
-                } 
+                }  else {
+                    self.queue.remove(i);
+                }
                 return QueueAction::Pass
             },
             None => QueueAction::NotFound,

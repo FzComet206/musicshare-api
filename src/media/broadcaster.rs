@@ -86,6 +86,7 @@ impl Broadcaster {
             while let Ok((page_data, page_header)) = ogg.parse_next_page() {
 
                 if is_broadcasting.load(Ordering::Acquire) == false {
+                    println!("Stopping broadcaster");
                     break;
                 }
 

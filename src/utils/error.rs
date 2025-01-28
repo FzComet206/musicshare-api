@@ -30,6 +30,7 @@ pub enum Error {
 
     S3DownloadError { msg: String },
     S3LoadFileError { msg: String },
+    ResetFileError { msg: String },
 
     SSEError { msg: String },
 }
