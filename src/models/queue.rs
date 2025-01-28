@@ -28,9 +28,8 @@ impl PlayQueue {
         &mut self, 
         key: String, 
         title: String, 
-        url: String, 
     ) -> QueueAction {
-        let item = vec![key.clone(), title, url];
+        let item = vec![key.clone(), title];
 
         self.queue.push(item);
         // item added is the only item in the queue, return the key

@@ -115,14 +115,17 @@ impl Broadcaster {
 
 
     pub async fn stop(&self) {
+        println!("Stopping broadcaster");
         self.is_broadcasting.store(false, Ordering::Release);
     }
 
     pub async fn pause(&self) {
+        println!("Pausing broadcaster");
         self.is_paused.store(true, Ordering::Release);
     }
 
     pub async fn resume(&self) {
+        println!("Resuming broadcaster");
         self.is_paused.store(false, Ordering::Release);
     }
 }

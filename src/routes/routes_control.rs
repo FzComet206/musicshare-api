@@ -1,16 +1,3 @@
-// this is a auth routes
-
-// implements the following apis
-
-// get self
-
-// create session
-// upload file
-// delete file
-// get files
-// add file to queue
-// change queue order
-// starts playback
 use std::sync::Arc;
 use axum::Router;
 use axum::routing::{ get, post };
@@ -50,6 +37,13 @@ struct DownloadRequest {
     urls: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AddQueue {
+    session_id: String,
+    key: String,
+    title: String,
+}
+
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
         .route("/test", post(test_auth))
@@ -58,6 +52,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/create_session", get(create_session))
         .route("/get_files", get(get_files))
         .route("/download_notify", get(download_notify))
+        .route("/add_to_queue", post(add_to_queue))
         .with_state(mc)
 }
 
@@ -226,4 +221,25 @@ async fn get_metadata(
             })))
         }
     }
+}
+
+async fn add_to_queue(
+    State(mc): State<Arc<SessionController>>,
+    Json(body): Json<AddQueue>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - add_to_queue", "Handler");
+
+    let key = body.key.clone();
+    let session_id = body.session_id.clone();
+    let title = body.title.clone();
+    let session = mc.get_session(session_id).await?;
+
+    // later should have ways to check if session belongs to user
+
+    session.add_to_queue(key, title).await?;
+    
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Download initiated",
+    })))
 }

@@ -338,55 +338,8 @@ impl FileManager {
         Ok(())
     }
 
-    async fn download_playlist(&self, url: String) -> Result<()> {
 
-        let output = Command::new(YT_DLP_PATH)
-            .arg("--flat-playlist")
-            .arg("--dump-single-json")
-            .arg("--playlist-end")
-            .arg("20")
-            .arg(url.clone())
-            .output().await?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let parsed: Value = serde_json::from_str(&stdout).expect("Failed to parse JSON");
-
-            if let Some(entries) = parsed["entries"].as_array() {
-                let urls: Vec<_> = entries
-                    .iter()
-                    .filter_map(|entry| {
-                        entry["url"].as_str().map(String::from)
-                    })
-                    .collect();
-                
-                // task pool size
-                let mut tasks = FuturesUnordered::new();
-
-                for url in urls {
-                    // for each url in the playlist, initiate download pipeline
-                    let sem_clone = self.semaphore.clone();
-
-                    tasks.push(task::spawn(async move{
-
-                        let _permit = sem_clone.acquire().await.unwrap();
-                        println!("Starting task: {}", url);
-                        // Self::download_audio(url.clone()).await;
-
-                    }));
-                }
-
-            } else {
-                return Err(Error::PlayListParseErr { msg: "no entries found in the playlist".to_string() });
-            }
-        } else {
-            // Print the error message if the command fails
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::PlayListParseErr { msg: stderr.to_string() });
-        }
-        Ok(())
-    }
-
+    // funcationalties to send server side events upon completion of processing
     pub async fn get_sender_with_id(&self, id: String) -> Result<broadcast::Sender<String>> {
         let mut processing_user = self.processing_user.lock().await;
         let sender = processing_user.get(&id)

@@ -25,13 +25,19 @@ use webrtc::ice_transport::ice_candidate::{
     RTCIceCandidate,
 };
 
+use axum::response::{
+    Sse,
+    sse::Event,
+    sse::KeepAlive,
+};
+use futures::Stream;
+use core::result::Result as CoreResult;
+
+use std::convert::Infallible;
+use std::time::Duration;
+use tokio_stream::{StreamExt};
 use axum::Extension;
 use sqlx::PgPool;
-
-#[derive(Debug, Deserialize)]
-struct SessionParams {
-    id: u64,
-}
 
 #[derive(Debug, Deserialize)]
 struct SDPAnswerRequest {
@@ -58,7 +64,6 @@ struct SessionID {
     session_id: String,
 }
 
-
 // this is a no auth route layer
 
 pub fn routes(mc: Arc<SessionController>) -> Router {
@@ -68,6 +73,8 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/get_ice", post(get_ice))
         .route("/set_ice", post(add_ice))
         .route("/state", get(server_state))
+        .route("/queue", get(get_queue))
+        .route("/queue_notify", get(queue_notify))
         .with_state(mc)
 }
 
@@ -178,8 +185,47 @@ async fn add_ice(
     })))
 }
 
+async fn get_queue(
+    State(mc): State<Arc<SessionController>>,
+    Query(params): Query<SessionID>,
+) -> Result<Json<Value>> {
 
+    let session = mc.get_session(params.session_id).await?;
+    let queue = session.get_queue().await?;
+    
+    Ok(Json(json!({
+        "status": "ok",
+        "queue": queue,
+    })))
+}
+
+async fn queue_notify(
+    State(mc): State<Arc<SessionController>>,
+    Query(params): Query<SessionID>,
+) -> Sse<impl Stream<Item = CoreResult<Event, Infallible>>> {
+
+    let session_id = params.session_id.clone();
+    println!("A peer is subscribed to queue notify");
+
+    let mut session = mc.get_session(session_id).await.unwrap();
+    let sender = session.get_sender().await.unwrap();
+    let mut rx = sender.subscribe();
+    // get sender from session
+
+    let stream = async_stream::stream! {
+        while let Ok(msg) = rx.recv().await {
+            yield Ok(Event::default().data(msg));
+        }
+    };
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive")
+    )
+}
 // add following apis
+// get all sessions
 
 // get all sessions with participants
 // join session with session uuid

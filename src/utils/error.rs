@@ -27,6 +27,11 @@ pub enum Error {
     UploadFailed { msg: String },
     QueueError { msg: String },
     DuplicateContent { msg: String },
+
+    S3DownloadError { msg: String },
+    S3LoadFileError { msg: String },
+
+    SSEError { msg: String },
 }
 
 impl IntoResponse for Error {

@@ -4,6 +4,7 @@ use crate::models::peer::PeerConnection;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::path::Path;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
 
@@ -26,6 +27,12 @@ use webrtc::ice_transport::ice_gatherer_state::RTCIceGathererState;
 
 use tokio::sync::broadcast;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+
+use aws_config::meta::region::RegionProviderChain;
+use aws_sdk_s3::{config::Region, Client};
+
 use crate::media::file_manager::{ FileManager, FMDownloadParams };
 use crate::models::queue::PlayQueue;
 use crate::models::queue::QueueAction::{ Next, Stop, Pass, NotFound };
@@ -39,6 +46,8 @@ pub struct Session {
     pub broadcaster: Broadcaster,
     pub queue: Arc<Mutex<PlayQueue>>,
     pub update: Arc<Mutex<broadcast::Sender<String>>>,
+    pub s3_client: Client,
+    // later add user id and time lapsed
 } 
 
 impl Session {
@@ -46,13 +55,20 @@ impl Session {
 
         let broadcaster = Broadcaster::new().await?;
 
+        // s3 client for downloading single file only
+        let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"));
+        let region = region_provider.region().await.unwrap();
+        let shared_config = aws_config::from_env().region(region_provider).load().await;
+        let client = Client::new(&shared_config);
+
         Ok(Self {
             id: 0,
             uuid: uuid::Uuid::new_v4().to_string(),
             peer_connections: Arc::new(Mutex::new(HashMap::new())),
             broadcaster: broadcaster,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
-            update: Arc::new(Mutex::new(broadcast::channel(10).0)),
+            update: Arc::new(Mutex::new(broadcast::channel(100).0)),
+            s3_client: client,
         })
     }
 
@@ -123,15 +139,16 @@ impl Session {
     }
 
     // queue change opreations pass in a function call back
-    pub async fn add_to_queue(&self, key: String, title: String, url: String) -> Result<()> {
+    pub async fn add_to_queue(&self, key: String, title: String) -> Result<()> {
         let mut queue = self.queue.lock().await;
-        match queue.add(key, title, url) {
+        match queue.add(key, title) {
             Next(key) => {
-                todo!()
+                self.set_active_file(key).await?;
             },
             Pass => (),
             _ => ()
         }
+        self.ping().await?;
         Ok(())
     }
 
@@ -139,7 +156,7 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.remove(key) {
             Next(key) => {
-                todo!()
+                self.set_active_file(key).await?;
             },
             Stop => {
                 todo!()
@@ -149,6 +166,7 @@ impl Session {
             },
             Pass => ()
         }
+        self.ping().await?;
         Ok(())
     }
 
@@ -157,7 +175,7 @@ impl Session {
         match queue.reorder(key, new_index as usize) {
             Next(key) => {
                 // handle the next item in the queue
-                todo!()
+                self.set_active_file(key).await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
@@ -165,6 +183,79 @@ impl Session {
             Pass => (),
             _ => ()
         }
+        self.ping().await?;
+        Ok(())
+    }
+
+    pub async fn set_active_file(&self, key: String) -> Result<()> {
+        // sets the active file for broadcaster to play
+
+        // genenerate a session directory in ./sessions/session_id
+
+        let session_id = self.uuid.clone();
+        let session_dir = format!("./sessions/{}", session_id.clone());
+
+        // Ensure the output directory exists
+        if !Path::new(&session_dir).exists() {
+            tokio::fs::create_dir_all(session_dir.clone()).await?;
+        }
+        
+        let file_dir = format!("{}/{}.ogg", session_dir, key);
+
+        let mut file = File::create(file_dir).map_err(|err| {
+            Error::S3DownloadError { msg: "Failed to initialize file for s3 download".to_string() }
+        })?;
+
+        let mut object = self.s3_client
+            .get_object()
+            .bucket("antaresmusicshare")
+            .key(format!("{}.ogg", key))
+            .send()
+            .await
+            .map_err(
+                |e| {
+                    Error::S3DownloadError { msg: e.to_string() }
+                }
+            )?;
+        
+        // download the file to the session directory with file manager
+        let mut byte_count = 0_usize;
+        while let Some(bytes) = object.body.try_next().await.map_err(|err| {
+            Error::S3DownloadError { msg: "Failed to read from s3 download streams".to_string() }
+        })? {
+            let bytes_len = bytes.len();
+            file.write_all(&bytes).map_err(|err| {
+                Error::S3DownloadError { msg: "Failed to write from s3 stream to local file".to_string() }
+            })?;
+            byte_count += bytes_len;
+        }
+
+        let file_path = format!("{}/{}.ogg", session_dir, key);
+        // invode broadcaster to play the filej
+        self.broadcaster.broadcast_audio_from_file(&file_path).await?;
+
+        println!("->> {:<12} - {} - set_active_file", "Session", key);
+        Ok(())
+    }
+
+    pub async fn clean_actve_file(&self) -> Result<()> {
+        // cleans the active files in session directory
+        Ok(())
+    }
+
+    pub async fn get_sender(&self) -> Result<broadcast::Sender<String>> {
+        let update = self.update.lock().await;
+        Ok(update.clone())
+    }
+
+    pub async fn ping(&self) -> Result<()> {
+        let sender = self.update.lock().await;
+
+        sender.send("check".to_string()).map_err(|e| {
+            Error::SSEError { msg: e.to_string() }
+        })?;
+
+        println!("Pinged Queue Update");
         Ok(())
     }
 }
