@@ -144,12 +144,12 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.add(key, title) {
             Next(key) => {
+                self.ping().await?;
                 self.set_active_file(key).await?;
             },
-            Pass => (),
-            _ => ()
+            Pass => self.ping().await?,
+            _ => self.ping().await?,
         }
-        self.ping().await?;
         Ok(())
     }
 
@@ -157,13 +157,13 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.remove(key) {
             Next(key) => {
-                self.set_active_file(key).await?;
                 self.ping().await?;
+                self.set_active_file(key).await?;
             },
             Stop => {
+                self.ping().await?;
                 self.clean_actve_file().await?;
                 self.broadcaster.stop().await;
-                self.ping().await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
@@ -190,9 +190,9 @@ impl Session {
         Ok(())
     }
 
+
     pub async fn set_active_file(&self, key: String) -> Result<()> {
         // sets the active file for broadcaster to play
-
         // genenerate a session directory in ./sessions/session_id
         self.broadcaster.stop().await;
 

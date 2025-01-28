@@ -34,7 +34,6 @@ const OGG_PAGE_DURATION: Duration = Duration::from_millis(20);
 pub struct Broadcaster {
     pub audio_track: Arc<TrackLocalStaticSample>,
     is_broadcasting: Arc<AtomicBool>,
-    is_paused: Arc<AtomicBool>,
 }
 
 impl Broadcaster {
@@ -54,7 +53,6 @@ impl Broadcaster {
         Ok(Self {
             audio_track: track,
             is_broadcasting: Arc::new(AtomicBool::new(false)),
-            is_paused: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -73,7 +71,6 @@ impl Broadcaster {
         let audio_track = self.audio_track.clone();
 
         let is_broadcasting = self.is_broadcasting.clone();
-        let is_paused = self.is_paused.clone();
 
         let handle = tokio::spawn(async move {
             let file = File::open(file_name).unwrap();
@@ -88,11 +85,6 @@ impl Broadcaster {
                 if is_broadcasting.load(Ordering::Acquire) == false {
                     println!("Stopping broadcaster");
                     break;
-                }
-
-                if is_paused.load(Ordering::Acquire) == true {
-                    let _ = ticker.tick().await;
-                    continue;
                 }
 
                 let sample_count = page_header.granule_position - last_granule;
@@ -114,19 +106,8 @@ impl Broadcaster {
         Ok(())
     }
 
-
     pub async fn stop(&self) {
         println!("Stopping broadcaster");
         self.is_broadcasting.store(false, Ordering::Release);
-    }
-
-    pub async fn pause(&self) {
-        println!("Pausing broadcaster");
-        self.is_paused.store(true, Ordering::Release);
-    }
-
-    pub async fn resume(&self) {
-        println!("Resuming broadcaster");
-        self.is_paused.store(false, Ordering::Release);
     }
 }

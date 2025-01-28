@@ -11,12 +11,14 @@ pub enum QueueAction {
 #[derive(Clone, Debug)]
 pub struct PlayQueue {
     queue: Vec<Vec<String>>,
+    curr_index: usize,
 }
 
 impl PlayQueue {
     pub fn new() -> Self {
         Self {
             queue: Vec::new(),
+            curr_index: 0,
         }
     }
 
@@ -40,10 +42,6 @@ impl PlayQueue {
         QueueAction::Pass
     }
 
-    // when a item is removed, there are three scenarios
-    // 1. the first item is revmoved, and the queue is not empty -- return key
-    // 2. the first item is removed, and the queue become empty -- return "stop"
-    // 3. not the first item is removed -- return None
     pub fn remove(&mut self, key: String) -> QueueAction {
         let index = self.queue.iter().position(|x| x[0] == key);
         match index {
@@ -78,5 +76,16 @@ impl PlayQueue {
             },
             None => QueueAction::NotFound,
         }
+    }
+
+    pub fn next(&mut self) -> QueueAction {
+
+        if self.curr_index == self.queue.len() - 1 {
+            self.curr_index = 0;
+        } else {
+            self.curr_index += 1;
+        }
+
+        QueueAction::Next(self.queue[self.curr_index][0].clone())
     }
 }
