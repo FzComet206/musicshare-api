@@ -162,10 +162,10 @@ impl Session {
         match queue.add(key, title) {
             Next(key) => {
                 self.play(key).await?;
-                self.ping().await?;
+                self.ping(queue.get_id()).await?;
             },
-            Pass => self.ping().await?,
-            _ => self.ping().await?,
+            Pass => self.ping(queue.get_id()).await?,
+            _ => self.ping(queue.get_id()).await?,
         }
         Ok(())
     }
@@ -175,21 +175,31 @@ impl Session {
         match queue.remove(key) {
             Next(key) => {
                 self.play(key).await?;
-                self.ping().await?;
+                self.ping(queue.get_id()).await?;
             },
             Stop => {
                 self.clean_active_file().await?;
-                self.ping().await?;
+                self.ping(queue.get_id()).await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
             },
-            Pass => { self.ping().await?; }
+            Pass => { 
+                self.ping(queue.get_id()).await?;
+            }
         }
         Ok(())
     }
 
     pub async fn play(&self, key: String) -> Result<()> {
+
+        let sender = self.update.clone();
+        let queue = self.queue.clone();
+
+        tokio::spawn(async move {
+            sender.lock().await.send(queue.lock().await.get_id());
+        });
+
         self.broadcaster.cmd_tx.send(BroadcasterCommand::Stop).await
             .map_err(|e| { Error::BroadcasterError { msg: "Failed to stop broadcaster".to_string() }})?;
 
@@ -205,6 +215,8 @@ impl Session {
         // let mut event_rx = self.broadcaster.event_rx.lock().await;
         let broadcaster = self.broadcaster.clone();
         let queue = self.queue.clone();
+        let sender = self.update.clone();
+
 
         tokio::spawn(async move {
 
@@ -215,6 +227,7 @@ impl Session {
                     BroadcasterEvent::End => {
                         // handle the next item in the queue
                         let next_key = queue.lock().await.next();
+                        sender.lock().await.send(queue.lock().await.get_id());
                         if !next_key.is_empty() {
                             let _ = broadcaster
                                 .cmd_tx
@@ -264,10 +277,10 @@ impl Session {
         Ok(update.clone())
     }
 
-    pub async fn ping(&self) -> Result<()> {
+    pub async fn ping(&self, index: String) -> Result<()> {
         let sender = self.update.lock().await;
 
-        sender.send("check".to_string()).map_err(|e| {
+        sender.send(index).map_err(|e| {
             Error::SSEError { msg: e.to_string() }
         })?;
 

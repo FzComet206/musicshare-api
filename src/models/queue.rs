@@ -87,4 +87,8 @@ impl PlayQueue {
 
         self.queue[self.curr_index][0].clone()
     }
+
+    pub fn get_id(&self) -> String {
+        return self.curr_index.to_string();
+    }
 }
