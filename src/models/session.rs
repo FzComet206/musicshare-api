@@ -191,6 +191,19 @@ impl Session {
         Ok(())
     }
 
+    pub async fn reorder_queue(&self, old_index: usize, new_index: usize) -> Result<()> {
+        let mut queue = self.queue.lock().await;
+        match queue.reorder(old_index, new_index) {
+            Next(key) => {
+                self.ping(queue.get_id()).await?;
+                self.play(key).await?;
+            },
+            Pass => self.ping(queue.get_id()).await?,
+            _ => self.ping(queue.get_id()).await?,
+        }
+        Ok(())
+    }
+
     pub async fn play(&self, key: String) -> Result<()> {
 
         let sender = self.update.clone();

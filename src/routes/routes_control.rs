@@ -50,6 +50,13 @@ struct RemoveQueue {
     key: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ReorderQueue {
+    session_id: String,
+    old_index: usize,
+    new_index: usize,
+}
+
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
         .route("/test", post(test_auth))
@@ -60,6 +67,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/download_notify", get(download_notify))
         .route("/add_to_queue", post(add_to_queue))
         .route("/remove_from_queue", post(remove_from_queue))
+        .route("/reorder_queue", post(reorder_queue))
         .with_state(mc)
 }
 
@@ -262,6 +270,25 @@ async fn remove_from_queue(
     let session = mc.get_session(session_id).await?;
 
     session.remove_from_queue(key).await?;
+    
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Removed",
+    }))
+)}
+
+async fn reorder_queue(
+    State(mc): State<Arc<SessionController>>,
+    Json(body): Json<ReorderQueue>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - remove_from_queue", "Handler");
+
+    let session_id = body.session_id.clone();
+    let old_index = body.old_index;
+    let new_index = body.new_index;
+    let session = mc.get_session(session_id).await?;
+
+    session.reorder_queue(old_index, new_index).await?;
     
     Ok(Json(json!({
         "status": "ok",

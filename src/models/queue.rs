@@ -74,6 +74,47 @@ impl PlayQueue {
         }
     }
 
+    pub fn reorder(&mut self, old_index: usize, new_index: usize) -> QueueAction {
+        if old_index >= self.queue.len() || new_index > self.queue.len() {
+            return QueueAction::NotFound;
+        }
+
+        if self.queue.is_empty() {
+            return QueueAction::Pass; 
+        }
+
+        let item = self.queue.remove(old_index);
+        self.queue.insert(new_index, item);
+
+        if old_index == self.curr_index {
+            self.curr_index = new_index;
+            return QueueAction::Pass;
+        } else if new_index == self.curr_index {
+            // problematic if this happenes and the old index is smaller than the current index
+            if old_index > self.curr_index {
+                self.curr_index += 1;
+            } else {
+                self.curr_index -= 1;
+            }
+            return QueueAction::Pass;
+        }
+
+        if old_index < self.curr_index && new_index > self.curr_index {
+            self.curr_index -= 1;
+        } else if old_index > self.curr_index && new_index <= self.curr_index {
+            self.curr_index += 1;
+        }
+
+        if self.curr_index >= self.queue.len() {
+            self.curr_index = self.queue.len().saturating_sub(1);
+        }
+
+        // back move to front with curr_index cause the current index to change
+
+
+        QueueAction::Pass
+    }
+
     pub fn next(&mut self) -> String {
 
         if self.queue.len() == 0 {
