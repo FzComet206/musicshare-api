@@ -46,8 +46,42 @@ use crate::media::file_manager::FileManager;
 use crate::ctx::Ctx;
 
 
+
+
+
 #[tokio::main]
 async fn main() -> Result<()> {
+
+    pub fn assert_is_send<T: Send>() {}
+
+    pub fn test_if_broadcaster_is_send() {
+        use crate::media::broadcaster::Broadcaster;
+        assert_is_send::<Broadcaster>();
+        println!("Broadcaster is Send");
+    }
+
+    pub fn test_if_session_is_send() {
+        use crate::models::session::Session;
+        assert_is_send::<Session>();
+        println!("Session is Send");
+    }
+
+    pub fn test_if_session_controller_is_send() {
+        use crate::models::SessionController;
+        assert_is_send::<SessionController>();
+        println!("SessionController is Send");
+    }
+
+    pub fn test_if_file_manager_is_send() {
+        use crate::media::file_manager::FileManager;
+        assert_is_send::<FileManager>();
+        println!("FileManager is Send");
+    }
+    
+    test_if_session_is_send();
+    test_if_broadcaster_is_send();
+    test_if_session_controller_is_send();
+    test_if_file_manager_is_send();
 
     // initialize session controller
     let mc = Arc::new(SessionController::new().await?);

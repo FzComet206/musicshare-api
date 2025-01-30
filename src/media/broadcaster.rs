@@ -24,11 +24,16 @@ use webrtc::media::{
     io::ogg_reader::OggReader,
 };
 use std::fs::File;
-
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::broadcast;
 
 const OGG_PAGE_DURATION: Duration = Duration::from_millis(20);
 
+pub enum BroadcasterEvent {
+    Play { file_path: String },
+    Pause,
+    Stop,
+}
 
 #[derive(Clone, Debug)]
 pub struct Broadcaster {
@@ -62,7 +67,10 @@ impl Broadcaster {
     }
 
 
-    pub async fn broadcast_audio_from_file(&self, file_path: &str) -> Result<()> {
+    pub async fn broadcast_audio_from_file(&self, 
+        file_path: &str,
+        update: broadcast::Sender<String>
+    ) -> Result<()> {
 
         // upon function call, set the is_broadcasting flag to true
         self.is_broadcasting.store(true, Ordering::Release);
@@ -72,7 +80,7 @@ impl Broadcaster {
 
         let is_broadcasting = self.is_broadcasting.clone();
 
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let file = File::open(file_name).unwrap();
             let reader = BufReader::new(file);
             let (mut ogg, _) = OggReader::new(reader, true).unwrap();
@@ -100,8 +108,10 @@ impl Broadcaster {
                     }).await;
 
                 let _ = ticker.tick().await;
-
             }
+            update.send("end".to_string()).map_err(|e| {
+                println!("Error sending update: {:?}", e);
+            });
         });
         Ok(())
     }

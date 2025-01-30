@@ -75,7 +75,6 @@ impl Session {
 
     pub async fn create_peer(& mut self) -> Result<(String)> {
 
-        let mut peer_connections = self.peer_connections.lock().await;
         let mut pc = PeerConnection::new(self.broadcaster.get_track().await.unwrap()).await;
 
         // uuid for identification
@@ -83,6 +82,7 @@ impl Session {
 
         println!("->> {:<12} - {} - create_peer", "Session", uuid);
 
+        let mut peer_connections = self.peer_connections.lock().await;
         peer_connections.insert(uuid.clone(), pc);
         Ok(uuid)
     }
@@ -162,7 +162,7 @@ impl Session {
             },
             Stop => {
                 self.ping().await?;
-                self.clean_actve_file().await?;
+                self.clean_active_file().await?;
                 self.broadcaster.stop().await;
             },
             NotFound => {
@@ -194,8 +194,8 @@ impl Session {
     pub async fn set_active_file(&self, key: String) -> Result<()> {
         // sets the active file for broadcaster to play
         // genenerate a session directory in ./sessions/session_id
-        self.broadcaster.stop().await;
 
+        self.broadcaster.stop().await;
         let session_id = self.uuid.clone();
         let session_dir = format!("./sessions/{}", session_id.clone());
 
@@ -249,14 +249,15 @@ impl Session {
         }
 
         let file_path = format!("{}/{}.ogg", session_dir, key);
-        // invode broadcaster to play the filej
-        self.broadcaster.broadcast_audio_from_file(&file_path).await?;
+        let sender_clone = self.update.lock().await.clone();
+
+        self.broadcaster.broadcast_audio_from_file(&file_path, sender_clone).await?;
 
         println!("->> {:<12} - {} - set_active_file", "Session", key);
         Ok(())
     }
 
-    pub async fn clean_actve_file(&self) -> Result<()> {
+    pub async fn clean_active_file(&self) -> Result<()> {
 
         let session_dir = format!("./sessions/{}", self.uuid.clone());
         let mut entries = match fs::read_dir(session_dir.clone()).await {
@@ -274,6 +275,8 @@ impl Session {
         Ok(())
     }
 
+
+    // server side events
     pub async fn get_sender(&self) -> Result<broadcast::Sender<String>> {
         let update = self.update.lock().await;
         Ok(update.clone())
@@ -352,4 +355,3 @@ impl SessionController{
         Ok(())
     }
 }
-

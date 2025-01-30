@@ -78,6 +78,7 @@ impl PlayQueue {
         }
     }
 
+
     pub fn next(&mut self) -> QueueAction {
 
         if self.curr_index == self.queue.len() - 1 {
