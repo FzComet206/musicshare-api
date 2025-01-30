@@ -50,6 +50,7 @@ impl PlayQueue {
                     // shift current index left by 1, because everything got moved up
                     self.curr_index -= 1;
                 }
+
                 self.queue.remove(i);
 
                 if i == self.curr_index {
@@ -58,8 +59,12 @@ impl PlayQueue {
                         self.curr_index = 0;
                         return QueueAction::Stop;
                     } else {
+                        if self.curr_index == self.queue.len() {
+                            self.curr_index -= 1;
+                        }
                         // if the queue is not empty, “play the same index” which now holds the next track
-                        return QueueAction::Next(self.next());
+                        println!("remove same index, curr_index: {}", self.curr_index);
+                        return QueueAction::Next(self.queue[self.curr_index][0].clone());
                     }
                 }
 
