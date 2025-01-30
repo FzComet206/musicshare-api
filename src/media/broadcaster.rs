@@ -8,10 +8,10 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use std::sync::Arc;
-use webrtc::error::{Error, Result};
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::sdp::sdp_type::RTCSdpType;
+use crate::utils::error::{Error, Result};
 
 use std::time::Duration;
 use std::io::BufReader;
@@ -24,17 +24,24 @@ use webrtc::media::{
     io::ogg_reader::OggReader,
 };
 use std::fs::File;
+use std::path::Path;
+use std::io::Write;
+use tokio::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 use std::collections::HashMap;
-use crate::models::peer::PeerConnection;
 use tokio::sync::oneshot;
+
+use crate::models::peer::PeerConnection;
+
+use aws_config::meta::region::RegionProviderChain;
+use aws_sdk_s3::{config::Region, Client};
 
 const OGG_PAGE_DURATION: Duration = Duration::from_millis(20);
 
 #[derive(Debug)]
 pub enum BroadcasterCommand {
-    Play { file_path: String },
+    Play { key: String },
     Pause,
     Stop,
     Attach {
@@ -62,6 +69,8 @@ pub struct Broadcaster {
     cmd_rx: mpsc::Receiver<BroadcasterCommand>,
     event_tx: mpsc::Sender<BroadcasterEvent>,
     peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
+    s3_client: Client,
+    session_id: String,
 }
 
 impl Broadcaster {
@@ -71,9 +80,15 @@ impl Broadcaster {
         cmd_rx: mpsc::Receiver<BroadcasterCommand>,
         event_tx: mpsc::Sender<BroadcasterEvent>,
         peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
+        session_id: String,
 
     ) -> Result<Self> {
 
+        // s3 client for downloading single file only
+        let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"));
+        let region = region_provider.region().await.unwrap();
+        let shared_config = aws_config::from_env().region(region_provider).load().await;
+        let client = Client::new(&shared_config);
 
         Ok(Self {
             audio_track: track,
@@ -81,15 +96,21 @@ impl Broadcaster {
             cmd_rx,
             event_tx,
             peer_connections,
+            s3_client: client,
+            session_id,
         })
     }
 
     pub async fn run(mut self) -> Result<()> {
         while let Some(cmd) = self.cmd_rx.recv().await {
             match cmd {
-                BroadcasterCommand::Play { file_path } => {
+                BroadcasterCommand::Play { key } => {
+                    if key.is_empty() {
+                        continue;
+                    }
+                    let file_path = self.set_active_file(key.clone()).await?;
                     self.broadcast(&file_path).await?;
-                    println!("Playing file: {}", file_path);
+                    println!("Playing file: {}", key);
                 }
                 BroadcasterCommand::Pause => {
                     println!("Pausing broadcaster");
@@ -109,6 +130,65 @@ impl Broadcaster {
         Ok(())
     }
 
+    
+    pub async fn set_active_file(&self, key: String) -> Result<(String)> {
+        let session_id = self.session_id.clone();
+        let session_dir = format!("./sessions/{}", session_id.clone());
+
+        // Ensure the output directory exists
+        if !Path::new(&session_dir).exists() {
+            tokio::fs::create_dir_all(session_dir.clone()).await?;
+        }
+
+        // if there are any files left in session_dir, delete them
+        let mut entries = match fs::read_dir(session_dir.clone()).await {
+            Ok(entries) => entries,
+            Err(e) => return Err(Error::ResetFileError { msg: e.to_string() }),
+        };
+
+        while let Some(entry) = entries.next_entry().await.transpose() {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                fs::remove_file(path).await?;
+            }
+        }
+        
+        let file_dir = format!("{}/{}.ogg", session_dir, key);
+
+        let mut file = File::create(file_dir).map_err(|err| {
+            Error::S3DownloadError { msg: "Failed to initialize file for s3 download".to_string() }
+        })?;
+
+        let mut object = self.s3_client
+            .get_object()
+            .bucket("antaresmusicshare")
+            .key(format!("{}.ogg", key))
+            .send()
+            .await
+            .map_err(
+                |e| {
+                    Error::S3DownloadError { msg: e.to_string() }
+                }
+            )?;
+        
+        // download the file to the session directory with file manager
+        let mut byte_count = 0_usize;
+        while let Some(bytes) = object.body.try_next().await.map_err(|err| {
+            Error::S3DownloadError { msg: "Failed to read from s3 download streams".to_string() }
+        })? {
+            let bytes_len = bytes.len();
+            file.write_all(&bytes).map_err(|err| {
+                Error::S3DownloadError { msg: "Failed to write from s3 stream to local file".to_string() }
+            })?;
+            byte_count += bytes_len;
+        }
+
+        let file_path = format!("{}/{}.ogg", session_dir, key);
+
+        Ok(file_path.to_string())
+    }
+
     pub async fn broadcast(&self, 
         file_path: &str,
     ) -> Result<()> {
@@ -124,6 +204,7 @@ impl Broadcaster {
 
         tokio::spawn(async move {
             let file = File::open(file_name).unwrap();
+            
             let reader = BufReader::new(file);
             let (mut ogg, _) = OggReader::new(reader, true).unwrap();
             

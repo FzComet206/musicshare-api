@@ -40,9 +40,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
-use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_s3::{config::Region, Client};
-
 use crate::media::file_manager::{ FileManager, FMDownloadParams };
 use crate::models::queue::PlayQueue;
 use crate::models::queue::QueueAction::{ Next, Stop, Pass, NotFound };
@@ -55,7 +52,6 @@ pub struct Session {
     pub broadcaster: BroadcasterHandle,
     pub queue: Arc<Mutex<PlayQueue>>,
     pub update: Arc<Mutex<broadcast::Sender<String>>>,
-    pub s3_client: Client,
     // later add user id and time lapsed
 } 
 
@@ -66,19 +62,12 @@ impl Session {
         peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     ) -> Result<Self> {
 
-        // s3 client for downloading single file only
-        let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"));
-        let region = region_provider.region().await.unwrap();
-        let shared_config = aws_config::from_env().region(region_provider).load().await;
-        let client = Client::new(&shared_config);
-
         Ok(Self {
             uuid: session_id,
             peer_connections, 
             broadcaster: broadcaster_handle,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
             update: Arc::new(Mutex::new(broadcast::channel(100).0)),
-            s3_client: client,
         })
     }
 
@@ -168,8 +157,8 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.add(key, title) {
             Next(key) => {
+                self.autoplay_loop(key).await?;
                 self.ping().await?;
-                self.set_active_file(key).await?;
             },
             Pass => self.ping().await?,
             _ => self.ping().await?,
@@ -181,12 +170,26 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.remove(key) {
             Next(key) => {
+                
+                // stop playing the current file
+                self.broadcaster.cmd_tx.send(
+                    BroadcasterCommand::Stop
+                ).await.map_err(|e| {
+                    Error::BroadcasterError { msg: "Failed to stop broadcaster".to_string() }
+                })?;
+
+
+                // behavior rn
+
+                // when remove the first item, not stopping and overlaps
+                // when remove the non first item but playing item, not stopping
+
+                self.autoplay_loop(key).await?;
                 self.ping().await?;
-                self.set_active_file(key).await?;
             },
             Stop => {
-                self.ping().await?;
                 self.clean_active_file().await?;
+                self.ping().await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
@@ -201,7 +204,7 @@ impl Session {
         match queue.reorder(key, new_index as usize) {
             Next(key) => {
                 // handle the next item in the queue
-                self.set_active_file(key).await?;
+                self.autoplay_loop(key).await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
@@ -213,91 +216,20 @@ impl Session {
         Ok(())
     }
 
+    pub async fn autoplay_loop(&self, key: String) -> Result<()> {
 
-    pub async fn set_active_file(&self, key: String) -> Result<()> {
-        // sets the active file for broadcaster to play
-        // genenerate a session directory in ./sessions/session_id
+
+        // start playing the new file 
         self.broadcaster.cmd_tx.send(
-            BroadcasterCommand::Stop
-        ).await.map_err(|e| {
-            Error::BroadcasterError { msg: "Failed to stop broadcaster".to_string() }
-        })?;
-
-        let session_id = self.uuid.clone();
-        let session_dir = format!("./sessions/{}", session_id.clone());
-
-        // Ensure the output directory exists
-        if !Path::new(&session_dir).exists() {
-            tokio::fs::create_dir_all(session_dir.clone()).await?;
-        }
-
-        // if there are any files left in session_dir, delete them
-        let mut entries = match fs::read_dir(session_dir.clone()).await {
-            Ok(entries) => entries,
-            Err(e) => return Err(Error::ResetFileError { msg: e.to_string() }),
-        };
-
-        while let Some(entry) = entries.next_entry().await.transpose() {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() {
-                fs::remove_file(path).await?;
-            }
-        }
-        
-        let file_dir = format!("{}/{}.ogg", session_dir, key);
-
-        let mut file = File::create(file_dir).map_err(|err| {
-            Error::S3DownloadError { msg: "Failed to initialize file for s3 download".to_string() }
-        })?;
-
-        let mut object = self.s3_client
-            .get_object()
-            .bucket("antaresmusicshare")
-            .key(format!("{}.ogg", key))
-            .send()
-            .await
-            .map_err(
-                |e| {
-                    Error::S3DownloadError { msg: e.to_string() }
-                }
-            )?;
-        
-        // download the file to the session directory with file manager
-        let mut byte_count = 0_usize;
-        while let Some(bytes) = object.body.try_next().await.map_err(|err| {
-            Error::S3DownloadError { msg: "Failed to read from s3 download streams".to_string() }
-        })? {
-            let bytes_len = bytes.len();
-            file.write_all(&bytes).map_err(|err| {
-                Error::S3DownloadError { msg: "Failed to write from s3 stream to local file".to_string() }
-            })?;
-            byte_count += bytes_len;
-        }
-
-        let file_path = format!("{}/{}.ogg", session_dir, key);
-
-        self.broadcaster.cmd_tx.send(
-            BroadcasterCommand::Play { file_path: file_path.clone() }
+            BroadcasterCommand::Play { key: key.clone() }
         ).await.map_err(|e| {
             Error::BroadcasterError { msg: "Failed to play file".to_string() }
         })?;
 
-        self.autoplay_loop(file_path.clone()).await;
-
-        println!("->> {:<12} - {} - set_active_file", "Session", key);
-        Ok(())
-    }
-
-    pub async fn autoplay_loop(&self, file_path: String) {
-        let session_id = self.uuid.clone();
         // let mut event_rx = self.broadcaster.event_rx.lock().await;
         let mut event_rx_arc = Arc::clone(&self.broadcaster.event_rx);
         let broadcaster = self.broadcaster.clone();
         let queue = self.queue.clone();
-        let fp = file_path.clone();
-
-        // clone a Arc versionof self
 
         tokio::spawn(async move {
             let mut event_rx = event_rx_arc.lock().await;
@@ -306,19 +238,29 @@ impl Session {
                     BroadcasterEvent::End => {
                         // handle the next item in the queue
                         broadcaster.cmd_tx.send(
-                            BroadcasterCommand::Play { file_path: fp.clone() }
+                            BroadcasterCommand::Play { 
+                                key: queue.lock().await.next().clone() 
+                            }
                         ).await;
 
-                        println!("->> {:<12} - {} - end of file", "Session", session_id);
+                        println!("->> {:<12} - {} - end of file", "Session", "autoplay_loop");
                     },
                     _ => (),
                 }
             }
-            println!("->> {:<12} - {} - end of autoplay loop", "Session", session_id);
+            println!("->> {:<12} - {} - end of autoplay loop", "Session", "autoplay_loop");
         });
+
+        Ok(())
     }
 
     pub async fn clean_active_file(&self) -> Result<()> {
+
+        self.broadcaster.cmd_tx.send(
+            BroadcasterCommand::Stop
+        ).await.map_err(|e| {
+            Error::BroadcasterError { msg: "Failed to stop broadcaster".to_string() }
+        })?;
 
         let session_dir = format!("./sessions/{}", self.uuid.clone());
         let mut entries = match fs::read_dir(session_dir.clone()).await {
@@ -394,7 +336,7 @@ impl SessionController{
         let peer_connections = Arc::new(Mutex::new(HashMap::new()));
 
         // spin up the broadcaster
-        let broadcaster = Broadcaster::new(track, cmd_rx, event_tx, Arc::clone(&peer_connections)).await?;
+        let broadcaster = Broadcaster::new(track, cmd_rx, event_tx, Arc::clone(&peer_connections), session_id.clone()).await?;
         tokio::spawn(async move {
             broadcaster.run().await;
         });

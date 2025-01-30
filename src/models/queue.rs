@@ -81,12 +81,19 @@ impl PlayQueue {
 
     pub fn next(&mut self) -> String {
 
+        if self.queue.len() == 0 {
+            return String::from("");
+        }
+
         if self.curr_index == self.queue.len() - 1 {
             self.curr_index = 0;
         } else {
             self.curr_index += 1;
         }
 
+        while self.curr_index >= self.queue.len() && self.curr_index > 0 {
+            self.curr_index -= 1;
+        }
         self.queue[self.curr_index][0].clone()
     }
 }
