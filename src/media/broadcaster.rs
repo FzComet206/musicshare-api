@@ -215,7 +215,8 @@ impl Broadcaster {
 
                 if is_broadcasting.load(Ordering::Acquire) == false {
                     println!("Stopping broadcaster");
-                    break;
+                    // must return here so it doesnt send the End event
+                    return;
                 }
 
                 let sample_count = page_header.granule_position - last_granule;

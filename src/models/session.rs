@@ -62,13 +62,17 @@ impl Session {
         peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     ) -> Result<Self> {
 
-        Ok(Self {
+        let session = Self {
             uuid: session_id,
             peer_connections, 
             broadcaster: broadcaster_handle,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
             update: Arc::new(Mutex::new(broadcast::channel(100).0)),
-        })
+        };
+
+        session.autoplay_loop().await?;
+
+        Ok(session)
     }
 
     pub async fn create_peer(&mut self) -> Result<(String, oneshot::Receiver<()>)> {
@@ -157,7 +161,7 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.add(key, title) {
             Next(key) => {
-                self.autoplay_loop(key).await?;
+                self.play(key).await?;
                 self.ping().await?;
             },
             Pass => self.ping().await?,
@@ -170,21 +174,7 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.remove(key) {
             Next(key) => {
-                
-                // stop playing the current file
-                self.broadcaster.cmd_tx.send(
-                    BroadcasterCommand::Stop
-                ).await.map_err(|e| {
-                    Error::BroadcasterError { msg: "Failed to stop broadcaster".to_string() }
-                })?;
-
-
-                // behavior rn
-
-                // when remove the first item, not stopping and overlaps
-                // when remove the non first item but playing item, not stopping
-
-                self.autoplay_loop(key).await?;
+                self.play(key).await?;
                 self.ping().await?;
             },
             Stop => {
@@ -199,51 +189,41 @@ impl Session {
         Ok(())
     }
 
-    pub async fn reorder_queue(&self, key: String, new_index: u64) -> Result<()> {
-        let mut queue = self.queue.lock().await;
-        match queue.reorder(key, new_index as usize) {
-            Next(key) => {
-                // handle the next item in the queue
-                self.autoplay_loop(key).await?;
-            },
-            NotFound => {
-                return Err(Error::QueueError { msg: "Key not found".to_string() });
-            },
-            Pass => (),
-            _ => ()
-        }
-        self.ping().await?;
+    pub async fn play(&self, key: String) -> Result<()> {
+        self.broadcaster.cmd_tx.send(BroadcasterCommand::Stop).await
+            .map_err(|e| { Error::BroadcasterError { msg: "Failed to stop broadcaster".to_string() }})?;
+
+        // start playing the new file 
+        self.broadcaster.cmd_tx.send(BroadcasterCommand::Play { key: key.clone() }).await
+            .map_err(|e| { Error::BroadcasterError { msg: "Failed to play file".to_string() }})?;
+
         Ok(())
     }
 
-    pub async fn autoplay_loop(&self, key: String) -> Result<()> {
-
-
-        // start playing the new file 
-        self.broadcaster.cmd_tx.send(
-            BroadcasterCommand::Play { key: key.clone() }
-        ).await.map_err(|e| {
-            Error::BroadcasterError { msg: "Failed to play file".to_string() }
-        })?;
+    pub async fn autoplay_loop(&self) -> Result<()> {
 
         // let mut event_rx = self.broadcaster.event_rx.lock().await;
-        let mut event_rx_arc = Arc::clone(&self.broadcaster.event_rx);
         let broadcaster = self.broadcaster.clone();
         let queue = self.queue.clone();
 
         tokio::spawn(async move {
-            let mut event_rx = event_rx_arc.lock().await;
+
+            let mut event_rx = broadcaster.event_rx.lock().await;
+
             while let Some(event) = event_rx.recv().await {
                 match event {
                     BroadcasterEvent::End => {
                         // handle the next item in the queue
-                        broadcaster.cmd_tx.send(
-                            BroadcasterCommand::Play { 
-                                key: queue.lock().await.next().clone() 
-                            }
-                        ).await;
+                        let next_key = queue.lock().await.next();
+                        if !next_key.is_empty() {
+                            let _ = broadcaster
+                                .cmd_tx
+                                .send(BroadcasterCommand::Play { key: next_key })
+                            .await;
+                        } else {
+                            println!("Empty queue, stopping autoplay loop");
+                        }
 
-                        println!("->> {:<12} - {} - end of file", "Session", "autoplay_loop");
                     },
                     _ => (),
                 }
