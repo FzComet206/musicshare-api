@@ -116,7 +116,11 @@ async fn get_offer(
 
     let mut session = mc.get_session(params.session_id).await?;
     // let offer = session.get_offer("hi".to_string()).await?;
-    let mut uuid = session.create_peer().await?;
+    let (mut uuid, mut rx) = session.create_peer().await?;
+
+    // await for the rx oneshot before getting offer
+    rx.await.unwrap();
+
     let id = uuid.clone();
     let offer = session.get_offer(uuid).await?;
 

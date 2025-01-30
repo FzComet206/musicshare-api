@@ -33,6 +33,8 @@ pub enum Error {
     ResetFileError { msg: String },
 
     SSEError { msg: String },
+
+    BroadcasterError { msg: String },
 }
 
 impl IntoResponse for Error {

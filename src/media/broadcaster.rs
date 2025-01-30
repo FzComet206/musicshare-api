@@ -25,51 +25,92 @@ use webrtc::media::{
 };
 use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use std::collections::HashMap;
+use crate::models::peer::PeerConnection;
+use tokio::sync::oneshot;
 
 const OGG_PAGE_DURATION: Duration = Duration::from_millis(20);
 
-pub enum BroadcasterEvent {
+#[derive(Debug)]
+pub enum BroadcasterCommand {
     Play { file_path: String },
     Pause,
     Stop,
+    Attach {
+        peer_id: String,
+        reply: oneshot::Sender<()>,
+    }
+}
+
+#[derive(Debug)]
+pub enum BroadcasterEvent {
+    End,
+    TrackAdded,
 }
 
 #[derive(Clone, Debug)]
+pub struct BroadcasterHandle {
+    pub cmd_tx: mpsc::Sender<BroadcasterCommand>,
+    pub event_rx: Arc<Mutex<mpsc::Receiver<BroadcasterEvent>>>
+}
+
+#[derive(Debug)]
 pub struct Broadcaster {
-    pub audio_track: Arc<TrackLocalStaticSample>,
+    audio_track: Arc<TrackLocalStaticSample>,
     is_broadcasting: Arc<AtomicBool>,
+    cmd_rx: mpsc::Receiver<BroadcasterCommand>,
+    event_tx: mpsc::Sender<BroadcasterEvent>,
+    peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
 }
 
 impl Broadcaster {
     /// Initializes a new Broadcaster with a WebRTC PeerConnection
-    pub async fn new() -> Result<Self> {
+    pub async fn new(
+        track: Arc<TrackLocalStaticSample>,
+        cmd_rx: mpsc::Receiver<BroadcasterCommand>,
+        event_tx: mpsc::Sender<BroadcasterEvent>,
+        peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
 
-        let track = Arc::new(TrackLocalStaticSample::new(
-            RTCRtpCodecCapability {
-                mime_type: MIME_TYPE_OPUS.to_owned(),
-                ..Default::default()
-            },
-            "audio".to_owned(),
-            "broadcaster".to_owned(),
-        ));
+    ) -> Result<Self> {
 
 
         Ok(Self {
             audio_track: track,
             is_broadcasting: Arc::new(AtomicBool::new(false)),
+            cmd_rx,
+            event_tx,
+            peer_connections,
         })
     }
 
-    pub async fn get_track(&mut self) -> Result<(Arc<TrackLocalStaticSample>)> {
-
-        Ok(self.audio_track.clone())
+    pub async fn run(mut self) -> Result<()> {
+        while let Some(cmd) = self.cmd_rx.recv().await {
+            match cmd {
+                BroadcasterCommand::Play { file_path } => {
+                    self.broadcast(&file_path).await?;
+                    println!("Playing file: {}", file_path);
+                }
+                BroadcasterCommand::Pause => {
+                    println!("Pausing broadcaster");
+                }
+                BroadcasterCommand::Stop => {
+                    self.stop().await;
+                    println!("Stopping broadcaster");
+                }
+                BroadcasterCommand::Attach { peer_id, reply } => {
+                    let pcs = self.peer_connections.lock().await;
+                    let pc = pcs.get(&peer_id).unwrap();
+                    pc.add_track(self.audio_track.clone()).await;
+                    let _ = reply.send(());
+                }
+            }
+        }
+        Ok(())
     }
 
-
-    pub async fn broadcast_audio_from_file(&self, 
+    pub async fn broadcast(&self, 
         file_path: &str,
-        update: broadcast::Sender<String>
     ) -> Result<()> {
 
         // upon function call, set the is_broadcasting flag to true
@@ -79,6 +120,7 @@ impl Broadcaster {
         let audio_track = self.audio_track.clone();
 
         let is_broadcasting = self.is_broadcasting.clone();
+        let event_tx = self.event_tx.clone();
 
         tokio::spawn(async move {
             let file = File::open(file_name).unwrap();
@@ -109,9 +151,8 @@ impl Broadcaster {
 
                 let _ = ticker.tick().await;
             }
-            update.send("end".to_string()).map_err(|e| {
-                println!("Error sending update: {:?}", e);
-            });
+
+            event_tx.send(BroadcasterEvent::End).await;
         });
         Ok(())
     }

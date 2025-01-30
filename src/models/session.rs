@@ -1,5 +1,9 @@
 use crate::utils::error::{Error, Result};
-use crate::media::broadcaster::Broadcaster;
+use crate::media::broadcaster::{
+    BroadcasterHandle,
+    BroadcasterCommand,
+    BroadcasterEvent,
+};
 use crate::models::peer::PeerConnection;
 
 use serde::{Deserialize, Serialize};
@@ -8,6 +12,7 @@ use std::path::Path;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::fs;
+use tokio::sync::oneshot;
 
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::media_engine::MIME_TYPE_VP8;
@@ -25,6 +30,10 @@ use webrtc::ice_transport::ice_candidate::{
     RTCIceCandidate,
 };
 use webrtc::ice_transport::ice_gatherer_state::RTCIceGathererState;
+use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::api::media_engine::MIME_TYPE_OPUS;
+
+use tokio::sync::mpsc;
 
 use tokio::sync::broadcast;
 use std::collections::HashMap;
@@ -37,14 +46,13 @@ use aws_sdk_s3::{config::Region, Client};
 use crate::media::file_manager::{ FileManager, FMDownloadParams };
 use crate::models::queue::PlayQueue;
 use crate::models::queue::QueueAction::{ Next, Stop, Pass, NotFound };
-
+use crate::media::broadcaster::Broadcaster;
 
 #[derive(Clone, Debug)]
 pub struct Session {
-    pub id: u64,
     pub uuid: String,
     pub peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
-    pub broadcaster: Broadcaster,
+    pub broadcaster: BroadcasterHandle,
     pub queue: Arc<Mutex<PlayQueue>>,
     pub update: Arc<Mutex<broadcast::Sender<String>>>,
     pub s3_client: Client,
@@ -52,9 +60,11 @@ pub struct Session {
 } 
 
 impl Session {
-    pub async fn new() -> Result<Self> {
-
-        let broadcaster = Broadcaster::new().await?;
+    pub async fn new(
+        session_id: String, 
+        broadcaster_handle: BroadcasterHandle,
+        peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
+    ) -> Result<Self> {
 
         // s3 client for downloading single file only
         let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"));
@@ -63,28 +73,42 @@ impl Session {
         let client = Client::new(&shared_config);
 
         Ok(Self {
-            id: 0,
-            uuid: uuid::Uuid::new_v4().to_string(),
-            peer_connections: Arc::new(Mutex::new(HashMap::new())),
-            broadcaster: broadcaster,
+            uuid: session_id,
+            peer_connections, 
+            broadcaster: broadcaster_handle,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
             update: Arc::new(Mutex::new(broadcast::channel(100).0)),
             s3_client: client,
         })
     }
 
-    pub async fn create_peer(& mut self) -> Result<(String)> {
+    pub async fn create_peer(&mut self) -> Result<(String, oneshot::Receiver<()>)> {
 
-        let mut pc = PeerConnection::new(self.broadcaster.get_track().await.unwrap()).await;
-
-        // uuid for identification
+        let mut pc = PeerConnection::new().await;
         let uuid = pc.uuid.clone();
-
         println!("->> {:<12} - {} - create_peer", "Session", uuid);
+
 
         let mut peer_connections = self.peer_connections.lock().await;
         peer_connections.insert(uuid.clone(), pc);
-        Ok(uuid)
+
+        // send peer uuid to broadcaster for attaching track
+        let (tx, rx) = oneshot::channel();
+        let broadcaster = self.broadcaster.clone();
+        let _uuid = uuid.clone();
+
+        let handle = tokio::spawn(async move {
+            broadcaster.cmd_tx.send(
+                BroadcasterCommand::Attach { 
+                    peer_id: _uuid.clone(),
+                    reply: tx
+                }
+            ).await.map_err(|e| {
+                Error::BroadcasterError { msg: "Failed to attach track to broadcaster".to_string() }
+            });
+        });
+
+        Ok((uuid, rx))
     }
 
     pub async fn get_offer(&self, peerid: String) -> Result<String> {
@@ -163,7 +187,6 @@ impl Session {
             Stop => {
                 self.ping().await?;
                 self.clean_active_file().await?;
-                self.broadcaster.stop().await;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
@@ -194,8 +217,12 @@ impl Session {
     pub async fn set_active_file(&self, key: String) -> Result<()> {
         // sets the active file for broadcaster to play
         // genenerate a session directory in ./sessions/session_id
+        self.broadcaster.cmd_tx.send(
+            BroadcasterCommand::Stop
+        ).await.map_err(|e| {
+            Error::BroadcasterError { msg: "Failed to stop broadcaster".to_string() }
+        })?;
 
-        self.broadcaster.stop().await;
         let session_id = self.uuid.clone();
         let session_dir = format!("./sessions/{}", session_id.clone());
 
@@ -249,12 +276,46 @@ impl Session {
         }
 
         let file_path = format!("{}/{}.ogg", session_dir, key);
-        let sender_clone = self.update.lock().await.clone();
 
-        self.broadcaster.broadcast_audio_from_file(&file_path, sender_clone).await?;
+        self.broadcaster.cmd_tx.send(
+            BroadcasterCommand::Play { file_path: file_path.clone() }
+        ).await.map_err(|e| {
+            Error::BroadcasterError { msg: "Failed to play file".to_string() }
+        })?;
+
+        self.autoplay_loop(file_path.clone()).await;
 
         println!("->> {:<12} - {} - set_active_file", "Session", key);
         Ok(())
+    }
+
+    pub async fn autoplay_loop(&self, file_path: String) {
+        let session_id = self.uuid.clone();
+        // let mut event_rx = self.broadcaster.event_rx.lock().await;
+        let mut event_rx_arc = Arc::clone(&self.broadcaster.event_rx);
+        let broadcaster = self.broadcaster.clone();
+        let queue = self.queue.clone();
+        let fp = file_path.clone();
+
+        // clone a Arc versionof self
+
+        tokio::spawn(async move {
+            let mut event_rx = event_rx_arc.lock().await;
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    BroadcasterEvent::End => {
+                        // handle the next item in the queue
+                        broadcaster.cmd_tx.send(
+                            BroadcasterCommand::Play { file_path: fp.clone() }
+                        ).await;
+
+                        println!("->> {:<12} - {} - end of file", "Session", session_id);
+                    },
+                    _ => (),
+                }
+            }
+            println!("->> {:<12} - {} - end of autoplay loop", "Session", session_id);
+        });
     }
 
     pub async fn clean_active_file(&self) -> Result<()> {
@@ -274,7 +335,6 @@ impl Session {
         }
         Ok(())
     }
-
 
     // server side events
     pub async fn get_sender(&self) -> Result<broadcast::Sender<String>> {
@@ -297,12 +357,8 @@ impl Session {
 
 #[derive(Clone, Debug)]
 pub struct SessionController{
-    pub sessions: 
-        Arc<
-            Mutex<
-                HashMap<
-                    String, Option<Session>
-                    >>>,
+    pub sessions: Arc<Mutex<HashMap<String, Option<Session>>>>,
+
     pub file_manager: Arc<Mutex<FileManager>>,
 }
 
@@ -317,15 +373,43 @@ impl SessionController{
 
     pub async fn create_session(&self) -> Result<(String)> {
 
+
         println!("->> {:<12} - create_session", "Controller");
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        // init control handles
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(100);
+        let (event_tx, mut event_rx) = mpsc::channel(100);
+
+
+        let track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_OPUS.to_owned(),
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            "broadcaster".to_owned(),
+        ));
+
+        let peer_connections = Arc::new(Mutex::new(HashMap::new()));
+
+        // spin up the broadcaster
+        let broadcaster = Broadcaster::new(track, cmd_rx, event_tx, Arc::clone(&peer_connections)).await?;
+        tokio::spawn(async move {
+            broadcaster.run().await;
+        });
+
+        let broadcaster_handle = BroadcasterHandle {
+            cmd_tx,
+            event_rx: Arc::new(Mutex::new(event_rx))
+        };
+        // create broadcaster and spin it on a task
+        let mut session = Session::new(session_id.clone(), broadcaster_handle, Arc::clone(&peer_connections)).await?;
 
         let mut sessions = self.sessions.lock().await;
-        let mut session = Session::new().await?;
+        sessions.insert(session_id.clone(), Some(session.clone()));
 
-        let uuid = uuid::Uuid::new_v4().to_string();
-        sessions.insert(uuid.clone(), Some(session.clone()));
-
-        Ok(uuid)
+        Ok(session_id)
     }
 
     pub async fn get_session(&self, id: String) -> Result<Session> {

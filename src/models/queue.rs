@@ -79,7 +79,7 @@ impl PlayQueue {
     }
 
 
-    pub fn next(&mut self) -> QueueAction {
+    pub fn next(&mut self) -> String {
 
         if self.curr_index == self.queue.len() - 1 {
             self.curr_index = 0;
@@ -87,6 +87,6 @@ impl PlayQueue {
             self.curr_index += 1;
         }
 
-        QueueAction::Next(self.queue[self.curr_index][0].clone())
+        self.queue[self.curr_index][0].clone()
     }
 }

@@ -34,7 +34,7 @@ pub struct PeerConnection{
 
 impl PeerConnection {
 
-    pub async fn new(track: Arc<TrackLocalStaticSample>) -> Self {
+    pub async fn new() -> Self {
 
         let mut m = MediaEngine::default();
         m.register_default_codecs();
@@ -55,13 +55,13 @@ impl PeerConnection {
         // Create a new RTCPeerConnection
         let peer_connection = api.new_peer_connection(config).await.unwrap();
 
-        let rtp_sender = peer_connection.add_track(track.clone()).await.unwrap();
+        // let rtp_sender = peer_connection.add_track(track.clone()).await.unwrap();
 
-        tokio::spawn(async move {
-            let mut rtcp_buf = vec![0u8; 1500];
-            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            Result::<()>::Ok(())
-        });
+        // tokio::spawn(async move {
+            // let mut rtcp_buf = vec![0u8; 1500];
+            // while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            // Result::<()>::Ok(())
+        // });
 
 
         Self {
@@ -74,6 +74,15 @@ impl PeerConnection {
         }
     }
 
+    pub async fn add_track(&self, track: Arc<TrackLocalStaticSample>) -> Result<()> {
+        let rtp_sender = self.peer_connection.add_track(track).await?;
+        tokio::spawn(async move {
+            let mut rtcp_buf = vec![0u8; 1500];
+            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            Result::<()>::Ok(())
+        });
+        Ok(())
+    }
 
     pub async fn get_offer(& mut self) -> Result<String> {
 
