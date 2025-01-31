@@ -48,6 +48,13 @@ use crate::models::peer::{
     Listener,
 };
 
+pub struct SessionStats {
+    pub session_owner: Listener,
+    pub num_listeners: usize,
+    pub listeners: Vec<Listener>,
+    pub active_file_title: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Session {
     pub uuid: String,
@@ -78,12 +85,10 @@ impl Session {
         Ok(session)
     }
 
-    pub async fn create_peer(&mut self) -> Result<(String, oneshot::Receiver<()>)> {
+    pub async fn create_peer(&mut self, listener: Listener) -> Result<(String, oneshot::Receiver<()>)> {
 
-        let mut pc = PeerConnection::new().await;
+        let mut pc = PeerConnection::new(listener).await;
         let uuid = pc.uuid.clone();
-        println!("->> {:<12} - {} - create_peer", "Session", uuid);
-
 
         let mut peer_connections = self.peer_connections.lock().await;
         peer_connections.insert(uuid.clone(), pc);
@@ -109,8 +114,6 @@ impl Session {
 
     pub async fn get_offer(&self, peerid: String) -> Result<String> {
 
-        println!("->> {:<12} - {} - get_sdp_offer", "Session", peerid);
-
         let mut peer_connections = self.peer_connections.lock().await;
 
         let offer = peer_connections.get_mut(&peerid).unwrap().get_offer().await?;
@@ -119,15 +122,12 @@ impl Session {
 
     pub async fn set_answer(&self, sdp: String, peerid: String) -> Result<()> {
 
-        println!("->> {:<12} - {} - set_answer", "Session", peerid);
         let mut peer_connections = self.peer_connections.lock().await;
         let pc = peer_connections.get_mut(&peerid).unwrap().set_answer(sdp).await?;
         Ok(())
     }
 
     pub async fn get_ice(&self, peerid: String) -> Result<Vec<RTCIceCandidate>> {
-
-        println!("->> {:<12} - {} - get_ice", "Session", peerid);
 
         let mut peer_connections = self.peer_connections.lock().await;
         let ice = peer_connections.get_mut(&peerid).unwrap().get_ice().await?;
@@ -136,7 +136,6 @@ impl Session {
 
     pub async fn add_ice(&self, candidate: RTCIceCandidateInit, peerid: String) -> Result<()> {
 
-        println!("->> {:<12} - {} - add_ice", "Session", peerid);
         let mut peer_connections = self.peer_connections.lock().await;
         let ice = peer_connections.get_mut(&peerid).unwrap().add_ice(candidate).await?;
         Ok(())
@@ -276,14 +275,12 @@ impl Session {
                                 .send(BroadcasterCommand::Play { key: next_key })
                             .await;
                         } else {
-                            println!("Empty queue, stopping autoplay loop");
                         }
 
                     },
                     _ => (),
                 }
             }
-            println!("->> {:<12} - {} - end of autoplay loop", "Session", "autoplay_loop");
         });
 
         Ok(())
@@ -325,8 +322,6 @@ impl Session {
         sender.send(index).map_err(|e| {
             Error::SSEError { msg: e.to_string() }
         })?;
-
-        println!("Pinged Queue Update");
         Ok(())
     }
 
@@ -351,6 +346,7 @@ impl Session {
         }
         Ok(listeners)
     }
+
 }
 
 
@@ -373,7 +369,6 @@ impl SessionController{
 
     pub async fn create_session(&self, user_id: String) -> Result<(String)> {
 
-        println!("->> {:<12} - create_session", "Controller");
         let session_id = uuid::Uuid::new_v4().to_string();
 
         // init control handles

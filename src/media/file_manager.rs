@@ -268,8 +268,6 @@ impl FileManager {
         
         let sender = self.get_sender_with_id(params.userid.clone()).await?;
         sender.send("check".to_string()).unwrap_or(0);
-        println!("Sent finished message to userid {}", params.userid.clone());
-
         Ok(())
     }
 
@@ -283,8 +281,6 @@ impl FileManager {
             .output()
             .await?;
 
-        println!("Output: {:?}", output);
-        
         if !output.status.success() {
             return Err(Error::InvalidURL {url: url.to_string()});
         }
@@ -328,10 +324,8 @@ impl FileManager {
 
         let size_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if let Ok(size) = size_str.parse::<u64>() {
-            println!("File size: {}", size);
 
             if size > limit {
-                println!("File size exceeds limit: {}", limit);
                 return Err(Error::FileTooLarge { size, limit })
             }
         } 

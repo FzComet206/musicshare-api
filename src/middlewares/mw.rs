@@ -29,6 +29,15 @@ pub async fn mw_require_auth<B>(
     Ok(next.run(req).await)
 }
 
+pub async fn mw_optional_auth<B>(
+    ctx: Result<Ctx>,
+    req: Request<B>,
+    next: Next<B>,
+) -> Result<Response> {
+    
+    Ok(next.run(req).await)
+}
+
 pub async fn mw_ctx_resolver<B>(
     State(mc): State<Arc<SessionController>>,
     cookies: Cookies,
@@ -117,6 +126,84 @@ pub async fn mw_ctx_resolver<B>(
                 return Err(Error::DBError { source: format!("{:?}", e) });
             }
         };
+
+    Ok(next.run(req).await)
+}
+
+pub async fn mw_optional_ctx_resolver<B>(
+    State(_mc): State<Arc<SessionController>>,
+    cookies: Cookies,
+    Extension(pool): Extension<PgPool>,
+    mut req: Request<B>,
+    next: Next<B>,
+) -> Result<Response> {
+
+    println!("->> {:12} - optional_ctx_resolver", "Middleware");
+
+    // Default context for anonymous users
+    let default_ctx = Ctx::new("-1".to_string(), "anonymous".to_string(), "".to_string());
+    let mut ctx_result: std::result::Result<Ctx, Error> = Ok(default_ctx.clone());
+
+    // Attempt to authenticate if the token exists
+    if let Some(auth_token) = cookies.get(AUTH_TOKEN).map(|c| c.value().to_string()) {
+        let result: Result<Ctx> = async {
+            let client = reqwest::Client::new();
+            let response = client
+                .get("https://www.googleapis.com/userinfo/v2/me")
+                .bearer_auth(&auth_token)
+                .send()
+                .await
+                .map_err(|_| Error::AuthFailInvalidToken)?;
+
+            let info = response
+                .json::<Value>()
+                .await
+                .map_err(|_| Error::AuthFailInvalidToken)?;
+
+            let id = info.get("id").and_then(Value::as_str).unwrap_or("");
+            let name = info.get("name").and_then(Value::as_str).unwrap_or("");
+            let picture = info.get("picture").and_then(Value::as_str).unwrap_or("");
+
+            if id.is_empty() {
+                return Err(Error::AuthFailInvalidToken);
+            }
+
+            // Check if user exists in the database
+            let rows = sqlx::query("SELECT * FROM users WHERE sub = $1")
+                .bind(id)
+                .fetch_all(&pool)
+                .await
+                .map_err(|e| Error::DBError {
+                    source: format!("{:?}", e),
+                })?;
+
+            match rows.len() {
+                1 => {
+                    let row = &rows[0];
+                    let userid: i32 = row.get("user_id");
+                    let name: String = row.get("name");
+                    let picture: String = row.get("picture");
+                    Ok(Ctx::new(userid.to_string(), name, picture))
+                }
+                _ => // pass
+                    Ok(default_ctx.clone()),
+            }
+        }
+        .await;
+
+        match result {
+            Ok(ctx) => ctx_result = Ok(ctx),
+            Err(e) => {
+                // Log error but proceed with default context
+                eprintln!("Authentication error in optional resolver: {:?}", e);
+                ctx_result = Ok(default_ctx);
+            }
+        }
+    }
+
+    // Insert the determined context into request extensions
+    // println!("->> {:12} - optional_ctx_resolver: {:?}", "Middleware", ctx_result);
+    req.extensions_mut().insert(ctx_result);
 
     Ok(next.run(req).await)
 }

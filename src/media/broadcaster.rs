@@ -110,14 +110,11 @@ impl Broadcaster {
                     }
                     let file_path = self.set_active_file(key.clone()).await?;
                     self.broadcast(&file_path).await?;
-                    println!("Playing file: {}", key);
                 }
                 BroadcasterCommand::Pause => {
-                    println!("Pausing broadcaster");
                 }
                 BroadcasterCommand::Stop => {
                     self.stop().await;
-                    println!("Stopping broadcaster");
                 }
                 BroadcasterCommand::Attach { peer_id, reply } => {
                     let pcs = self.peer_connections.lock().await;
@@ -214,7 +211,6 @@ impl Broadcaster {
             while let Ok((page_data, page_header)) = ogg.parse_next_page() {
 
                 if is_broadcasting.load(Ordering::Acquire) == false {
-                    println!("Stopping broadcaster");
                     // must return here so it doesnt send the End event
                     return;
                 }
@@ -240,7 +236,6 @@ impl Broadcaster {
     }
 
     pub async fn stop(&self) {
-        println!("Stopping broadcaster");
         self.is_broadcasting.store(false, Ordering::Release);
     }
 }

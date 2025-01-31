@@ -3,6 +3,9 @@ use crate::models::session::{
     Session,
 };
 
+use crate::Ctx;
+use crate::models::peer::Listener;
+
 use crate::Result;
 use serde::{
     Deserialize,
@@ -107,16 +110,21 @@ async fn server_state(
 }
 
 async fn get_offer(
+    ctx: Ctx,
     State(mc): State<Arc<SessionController>>,
     Query(params): Query<SessionID>,
 ) -> Result<Json<Value>> {
-    println!("->> {:<12} - join_session", "Handler");
-
-    // in final impl, this should have request payload of session uuid
+    println!("->> {:<12} - get_offer - {:<12}", "Handler", ctx.name());
 
     let mut session = mc.get_session(params.session_id).await?;
     // let offer = session.get_offer("hi".to_string()).await?;
-    let (mut uuid, mut rx) = session.create_peer().await?;
+    let (mut uuid, mut rx) = session.create_peer(
+        Listener {
+            name: ctx.name(),
+            picture: ctx.picture(),
+            id: ctx.id(),
+        }
+    ).await?;
 
     // await for the rx oneshot before getting offer
     rx.await.unwrap();
@@ -134,14 +142,14 @@ async fn get_offer(
 
 async fn set_answer(
     // get request body
+    ctx: Ctx,
     Query(params): Query<SessionID>,
     State(mc): State<Arc<SessionController>>,
     Json(body): Json<SDPAnswerRequest>,
 ) -> Result<Json<Value>> {
-    println!("->> {:<12} - set_answer", "Handler");
+    println!("->> {:<12} - set_answer - {:<12}", "Handler", ctx.name());
 
     let mut session = mc.get_session(params.session_id).await?;
-
     session.set_answer(body.sdp, body.peerid).await?;
 
     Ok(Json(json!({
@@ -151,28 +159,30 @@ async fn set_answer(
 }
 
 async fn get_ice(
+    ctx: Ctx,
     Query(params): Query<SessionID>,
     State(mc): State<Arc<SessionController>>,
     Json(body): Json<GetIceRequest>,
 ) -> Result<Json<Vec<RTCIceCandidate>>> {
-    println!("->> {:<12} - get_ice", "Handler");
+
+    println!("->> {:<12} - get_ice - {:<12}", "Handler", ctx.name());
 
     let mut session = mc.get_session(params.session_id).await?;
-
     let candidates = session.get_ice(body.peerid).await?.clone();
 
     Ok(Json(candidates))
 }
 
 async fn add_ice(
+    ctx: Ctx,
     Query(params): Query<SessionID>,
     State(mc): State<Arc<SessionController>>,
     Json(body): Json<ICECandidateRequest>,
 ) -> Result<Json<Value>> {
-    println!("->> {:<12} - add_ice_candidate", "Handler");
+
+    println!("->> {:<12} - add_ice - {:<12}", "Handler", ctx.name());
 
     let mut session = mc.get_session(params.session_id).await?;
-
     let candidate = RTCIceCandidateInit {
         candidate: body.candidate,
         ..Default::default()
@@ -194,6 +204,8 @@ async fn get_queue(
     Query(params): Query<SessionID>,
 ) -> Result<Json<Value>> {
 
+    println!("->> {:<12} - get_queue", "Handler");
+
     let session = mc.get_session(params.session_id).await?;
     let queue = session.get_queue().await?;
     
@@ -208,8 +220,8 @@ async fn queue_notify(
     Query(params): Query<SessionID>,
 ) -> Sse<impl Stream<Item = CoreResult<Event, Infallible>>> {
 
+    println!("->> {:<12} - queue_notify", "Handler");
     let session_id = params.session_id.clone();
-    println!("A peer is subscribed to queue notify");
 
     let mut session = mc.get_session(session_id).await.unwrap();
     let sender = session.get_sender().await.unwrap();
@@ -228,11 +240,3 @@ async fn queue_notify(
             .text("keep-alive")
     )
 }
-// add following apis
-// get all sessions
-
-// get all sessions with participants
-// join session with session uuid
-// exit session
-// get participants
-// get queue

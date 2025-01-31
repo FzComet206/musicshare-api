@@ -25,7 +25,7 @@ use crate::utils::error::{Error, Result};
 #[derive(Clone, Debug)]
 pub struct Listener {
     pub name: String,
-    pub pic: String,
+    pub picture: String,
     pub id: String,
 }
 
@@ -42,7 +42,7 @@ pub struct PeerConnection{
 
 impl PeerConnection {
 
-    pub async fn new() -> Self {
+    pub async fn new(listener: Listener) -> Self {
 
         let mut m = MediaEngine::default();
         m.register_default_codecs();
@@ -70,11 +70,7 @@ impl PeerConnection {
             active: Arc::new(Mutex::new(true)),
             gathering_state: Arc::new(Notify::new()),
             is_gathering_complete: Arc::new(Mutex::new(false)),
-            listener: Listener {
-                name: "Anynomous".to_string(),
-                pic: "https://ui-avatars.com/api/?name=U".to_string(),
-                id: "-1".to_string(),
-            },
+            listener,
         }
     }
 
@@ -94,14 +90,19 @@ impl PeerConnection {
 
         // Use an Arc<Mutex> for `self.active` to make it thread-safe and `'static`
         let active = Arc::clone(&self.active); // Assume self.active is Arc<Mutex<bool>>
+        let name = self.listener.name.clone();
 
         pc.on_peer_connection_state_change(Box::new(move |state| {
-            println!(
-                "->> {:<12} Peer Connection State Change: {:?}",
-                "PeerConnection", state
-            );
-
+            // println!(
+                // "->> {:<12} Peer Connection State Change: {:?}",
+                // "PeerConnection", state
+            // );
             let active = Arc::clone(&active);
+
+            if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
+                // Set active to false
+                println!("->> {:<12} - {:?} is connected", "PeerConnection", name);
+            }
 
             Box::pin(async move {
                 if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected {

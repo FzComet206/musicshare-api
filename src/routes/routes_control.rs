@@ -88,7 +88,7 @@ async fn me(
     let name = ctx.name();
     let picture = ctx.picture();
     let session = mc.get_user_session(id.clone()).await?;
-    println!("->> test_auth id: {}, name: {}", id, name);
+    println!("->> user: {}, name: {}", id, name);
 
     Ok(Json(json!({
         "id": id,
@@ -156,9 +156,10 @@ async fn download_notify(
     State(mc): State<Arc<SessionController>>,
 ) -> Sse<impl Stream<Item = CoreResult<Event, Infallible>>> {
 
+    println!("->> {:<12} - download_notify", "Handler");
+
     let user_id = ctx.id();
     let user_name = ctx.name();
-    println!("user_id: {}, user_name: {} subscribed to download notify", user_id, user_name);
 
     let (sender, _) = broadcast::channel(100);
     let mut rx = sender.subscribe();
@@ -311,7 +312,7 @@ async fn reorder_queue(
     State(mc): State<Arc<SessionController>>,
     Json(body): Json<ReorderQueue>,
 ) -> Result<Json<Value>> {
-    println!("->> {:<12} - remove_from_queue", "Handler");
+    println!("->> {:<12} - reorder_queue", "Handler");
 
     let user_id = ctx.id();
     let session_id = body.session_id.clone();
