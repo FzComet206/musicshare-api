@@ -38,6 +38,7 @@ pub enum Error {
     BroadcasterError { msg: String },
 
     SessionExists,
+    SessionNotOwned,
 }
 
 #[derive(Clone, Debug)]

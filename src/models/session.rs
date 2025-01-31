@@ -207,6 +207,32 @@ impl Session {
         Ok(())
     }
 
+    pub async fn next_in_queue(&self) -> Result<()> {
+        let mut queue = self.queue.lock().await;
+        let key = queue.next();
+        if key.is_empty() {
+            self.ping(queue.get_id()).await?;
+            self.clean_active_file().await?;
+        } else {
+            self.ping(queue.get_id()).await?;
+            self.play(key).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn prev_in_queue(&self) -> Result<()> {
+        let mut queue = self.queue.lock().await;
+        let key = queue.prev();
+        if key.is_empty() {
+            self.ping(queue.get_id()).await?;
+            self.clean_active_file().await?;
+        } else {
+            self.ping(queue.get_id()).await?;
+            self.play(key).await?;
+        }
+        Ok(())
+    }
+
     pub async fn play(&self, key: String) -> Result<()> {
 
         let sender = self.update.clone();
@@ -415,13 +441,33 @@ impl SessionController{
         Ok(())
     }
 
-    pub async fn check_user_own_session(&self, user_id: String) -> Result<bool> {
+    pub async fn check_user_has_session(&self, user_id: String) -> Result<bool> {
         let session_owners = self.session_owners.lock().await;
         match session_owners.get(&user_id) {
             Some(id) => {
                 Ok(true)
             },
             None => Ok(false),
+        }
+    }
+
+    pub async fn check_user_own_session(&self, user_id: String, session_id: String) -> Result<bool> {
+        let session_owners = self.session_owners.lock().await;
+        match session_owners.get(&user_id) {
+            Some(id) => {
+                Ok(*id == session_id)
+            },
+            None => Ok(false),
+        }
+    }
+
+    pub async fn get_user_session(&self, user_id: String) -> Result<String> {
+        let session_owners = self.session_owners.lock().await;
+        match session_owners.get(&user_id) {
+            Some(id) => {
+                Ok(id.clone())
+            },
+            None => Ok("".to_string()),
         }
     }
 }

@@ -137,4 +137,22 @@ impl PlayQueue {
     pub fn get_id(&self) -> String {
         return self.curr_index.to_string();
     }
+
+    pub fn prev(&mut self) -> String {
+        if self.queue.len() == 0 {
+            return String::from("");
+        }
+
+        if self.curr_index == 0 {
+            self.curr_index = self.queue.len() - 1;
+        } else {
+            self.curr_index -= 1;
+        }
+
+        while self.curr_index >= self.queue.len() && self.curr_index > 0 {
+            self.curr_index -= 1;
+        }
+
+        self.queue[self.curr_index][0].clone()
+    }
 }
