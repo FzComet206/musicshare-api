@@ -23,6 +23,13 @@ use std::sync::Arc;
 use crate::utils::error::{Error, Result};
 
 #[derive(Clone, Debug)]
+pub struct Listener {
+    pub name: String,
+    pub pic: String,
+    pub id: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct PeerConnection{
     pub uuid: String,
     pub peer_connection: Arc<RTCPeerConnection>,
@@ -30,6 +37,7 @@ pub struct PeerConnection{
     pub active: Arc<Mutex<bool>>,
     pub gathering_state: Arc<Notify>,
     pub is_gathering_complete: Arc<Mutex<bool>>,
+    pub listener: Listener,
 }
 
 impl PeerConnection {
@@ -55,15 +63,6 @@ impl PeerConnection {
         // Create a new RTCPeerConnection
         let peer_connection = api.new_peer_connection(config).await.unwrap();
 
-        // let rtp_sender = peer_connection.add_track(track.clone()).await.unwrap();
-
-        // tokio::spawn(async move {
-            // let mut rtcp_buf = vec![0u8; 1500];
-            // while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            // Result::<()>::Ok(())
-        // });
-
-
         Self {
             uuid: uuid::Uuid::new_v4().to_string(),
             peer_connection: Arc::new(peer_connection),
@@ -71,6 +70,11 @@ impl PeerConnection {
             active: Arc::new(Mutex::new(true)),
             gathering_state: Arc::new(Notify::new()),
             is_gathering_complete: Arc::new(Mutex::new(false)),
+            listener: Listener {
+                name: "Anynomous".to_string(),
+                pic: "https://ui-avatars.com/api/?name=U".to_string(),
+                id: "-1".to_string(),
+            },
         }
     }
 
@@ -175,4 +179,7 @@ impl PeerConnection {
         Ok(())
     }
 
+    pub async fn get_profile(&self) -> Result<Listener> {
+        Ok(self.listener.clone())
+    }
 }

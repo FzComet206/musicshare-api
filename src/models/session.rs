@@ -4,7 +4,6 @@ use crate::media::broadcaster::{
     BroadcasterCommand,
     BroadcasterEvent,
 };
-use crate::models::peer::PeerConnection;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -44,6 +43,10 @@ use crate::media::file_manager::{ FileManager, FMDownloadParams };
 use crate::models::queue::PlayQueue;
 use crate::models::queue::QueueAction::{ Next, Stop, Pass, NotFound };
 use crate::media::broadcaster::Broadcaster;
+use crate::models::peer::{
+    PeerConnection,
+    Listener,
+};
 
 #[derive(Clone, Debug)]
 pub struct Session {
@@ -300,13 +303,35 @@ impl Session {
         println!("Pinged Queue Update");
         Ok(())
     }
+
+    pub async fn get_number_of_listeners(&self) -> Result<usize> {
+        let peer_connections = self.peer_connections.lock().await;
+        let mut num_active = 0;
+        for (_, pc) in peer_connections.iter() {
+            let active = pc.active.lock().await;
+            if *active {
+                num_active += 1;
+            }
+        }
+        Ok(num_active)
+    }
+
+    pub async fn get_all_listeners_profile(&self) -> Result<Vec<Listener>> {
+        let peer_connections = self.peer_connections.lock().await;
+        let mut listeners = Vec::new();
+        for (_, pc) in peer_connections.iter() {
+            let listener = pc.get_profile().await?;
+            listeners.push(listener);
+        }
+        Ok(listeners)
+    }
 }
 
 
 #[derive(Clone, Debug)]
 pub struct SessionController{
     pub sessions: Arc<Mutex<HashMap<String, Option<Session>>>>,
-
+    pub session_owners: Arc<Mutex<HashMap<String, String>>>,
     pub file_manager: Arc<Mutex<FileManager>>,
 }
 
@@ -315,12 +340,12 @@ impl SessionController{
     pub async fn new() -> Result<Self> {
         Ok(Self {
             sessions: Arc::default(),
+            session_owners: Arc::default(),
             file_manager: Arc::new(Mutex::new(FileManager::new().await?)),
         })
     }
 
-    pub async fn create_session(&self) -> Result<(String)> {
-
+    pub async fn create_session(&self, user_id: String) -> Result<(String)> {
 
         println!("->> {:<12} - create_session", "Controller");
         let session_id = uuid::Uuid::new_v4().to_string();
@@ -357,6 +382,9 @@ impl SessionController{
         let mut sessions = self.sessions.lock().await;
         sessions.insert(session_id.clone(), Some(session.clone()));
 
+        let mut session_owners = self.session_owners.lock().await;
+        session_owners.insert(user_id.clone(), session_id.clone());
+
         Ok(session_id)
     }
 
@@ -385,5 +413,15 @@ impl SessionController{
         let mut file_manager = self.file_manager.lock().await;
         file_manager.add_sender_with_id(id, sender).await?;
         Ok(())
+    }
+
+    pub async fn check_user_own_session(&self, user_id: String) -> Result<bool> {
+        let session_owners = self.session_owners.lock().await;
+        match session_owners.get(&user_id) {
+            Some(id) => {
+                Ok(true)
+            },
+            None => Ok(false),
+        }
     }
 }

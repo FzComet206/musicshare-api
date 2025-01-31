@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 pub type Result<T> = core::result::Result<T, Error>;
+pub type ClientResult<T> = core::result::Result<T, ClientError>;
 
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -35,9 +36,27 @@ pub enum Error {
     SSEError { msg: String },
 
     BroadcasterError { msg: String },
+
+    SessionExists,
 }
 
+#[derive(Clone, Debug)]
+pub enum ClientError {
+    SessionExists,
+}
+
+
 impl IntoResponse for Error {
+    fn into_response(self) -> Response {
+        println!("->> {:<12} - {self:?}", "INTO_RES");
+
+        // return a response with the error code and message
+        // return the error type and message
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", self)).into_response()
+    }
+}
+
+impl IntoResponse for ClientError {
     fn into_response(self) -> Response {
         println!("->> {:<12} - {self:?}", "INTO_RES");
 

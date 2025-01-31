@@ -21,7 +21,7 @@ use tokio_stream::{StreamExt};
 use core::result::Result as CoreResult;
 use sqlx::Row;
 
-use crate::utils::error::{ Error, Result };
+use crate::utils::error::{ Error, Result, ClientError };
 use crate::models::SessionController;
 use crate::ctx::Ctx;
 use crate::media::file_manager::{ FileManager, FMDownloadParams};
@@ -89,12 +89,37 @@ async fn test_auth(
     })))
 }
 
+async fn me(
+    State(mc): State<Arc<SessionController>>,
+    Extension(pool) : Extension<PgPool>,
+    ctx: Ctx,
+) -> Result<Json<Value>> {
+
+    let id = ctx.id();
+    let name = ctx.name();
+    let picture = ctx.picture();
+    println!("->> test_auth id: {}, name: {}", id, name);
+
+    Ok(Json(json!({
+        "id": id,
+        "name": name,
+        "picture": picture,
+    })))
+}
+
+
 async fn create_session(
     State(mc): State<Arc<SessionController>>,
+    ctx: Ctx,
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - create_session", "Handler");
 
-    let mut sessionid = mc.create_session().await?;
+    let id = ctx.id();
+    if (mc.check_user_own_session(id.clone()).await?) {
+        return Err(Error::SessionExists);
+    }
+
+    let mut sessionid = mc.create_session(id).await?;
     
     Ok(Json(json!({
         "status": "ok",
