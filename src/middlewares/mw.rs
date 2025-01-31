@@ -18,118 +18,131 @@ use crate::ctx::Ctx;
 use crate::models::SessionController;
 use tower_cookies::{Cookie, Cookies};
 
+/// Trivial middleware that requires a valid context (set by a previous resolver).
 pub async fn mw_require_auth<B>(
     ctx: Result<Ctx>,
     req: Request<B>,
     next: Next<B>,
 ) -> Result<Response> {
-    
+    // Fail immediately if the context is not valid.
     ctx?;
-    
     Ok(next.run(req).await)
 }
 
+/// A no-op middleware (you may remove or extend it as needed).
 pub async fn mw_optional_auth<B>(
-    ctx: Result<Ctx>,
+    _ctx: Result<Ctx>,
     req: Request<B>,
     next: Next<B>,
 ) -> Result<Response> {
-    
     Ok(next.run(req).await)
 }
 
-pub async fn mw_ctx_resolver<B>(
-    State(mc): State<Arc<SessionController>>,
-    cookies: Cookies,
-    Extension(pool) : Extension<PgPool>,
-    mut req: Request<B>,
-    next: Next<B>,
-) -> Result<Response> {
-
-    // this middleware layers handles authentications and insert into request body
-    println!("->> {:12} - ctx_resolver", "Middleware");
-    
-    // get the cookie named google_access_token
-    let auth_token = match cookies.get(AUTH_TOKEN) {
-        Some(cookie) => cookie.value().to_string(),
-        None => return Err(Error::AuthFailNoToken),
-    };
-
+/// Helper: given a pool and auth token, fetch the user info from Google and then
+/// retrieve or insert the corresponding user into the database.
+async fn resolve_ctx_with_auth_token(pool: &PgPool, auth_token: &str) -> Result<Ctx> {
     let client = reqwest::Client::new();
-
-    let response = client.get("https://www.googleapis.com/userinfo/v2/me")
+    let response = client
+        .get("https://www.googleapis.com/userinfo/v2/me")
         .bearer_auth(auth_token)
         .send()
         .await
         .map_err(|_| Error::AuthFailInvalidToken)?;
-    
-    let info = response.json::<Value>().await.map_err(|_| Error::AuthFailInvalidToken)?;
-    let id = info.get("id").unwrap_or(&Value::Null).as_str().unwrap_or("");
-    let name = info.get("name").unwrap_or(&Value::Null).as_str().unwrap_or("");
-    let picture = info.get("picture").unwrap_or(&Value::Null).as_str().unwrap_or("");
 
+    let info = response
+        .json::<Value>()
+        .await
+        .map_err(|_| Error::AuthFailInvalidToken)?;
+
+    let id = info.get("id").and_then(Value::as_str).unwrap_or("");
     if id.is_empty() {
         return Err(Error::AuthFailInvalidToken);
     }
+    let name = info.get("name").and_then(Value::as_str).unwrap_or("");
+    let picture = info.get("picture").and_then(Value::as_str).unwrap_or("");
 
-    match sqlx::query("SELECT * FROM users WHERE sub = $1")
+    // Query for an existing user.
+    let rows = sqlx::query("SELECT * FROM users WHERE sub = $1")
         .bind(id)
-        .fetch_all(&pool)
-        .await {
-            Ok(row) => {
-                match row.len() {
-                    1 => {
-                        row.iter().for_each(|row| {
-                            let name: String = row.get("name");
-                            let picture: String = row.get("picture");
-                            let userid: i32 = row.get("user_id");
-                            let result_ctx: Result<Ctx> = Ok(Ctx::new(userid.to_string(), name, picture));
-                            req.extensions_mut().insert(result_ctx);
-                        });
-                    }
-                    0 => {
-                        match sqlx::query(
-                            "INSERT INTO 
-                                users (oauth_type, sub, name, picture) 
-                                VALUES ('google', $1, $2, $3)
-                                "
-                            )
-                            .bind(id)
-                            .bind(name)
-                            .bind(picture)
-                            .execute(&pool)
-                            .await {
-                                Ok(_) => {
-                                    match sqlx::query("SELECT * FROM users WHERE sub = $1")
-                                        .bind(id)
-                                        .fetch_all(&pool)
-                                        .await {
-                                            Ok(row) => {
-                                                row.iter().for_each(|row| {
-                                                    let name: String = row.get("name");
-                                                    let picture: String = row.get("picture");
-                                                    let userid: String = row.get("user_id");
-                                                    let result_ctx: Result<Ctx> = Ok(Ctx::new(userid, name, picture));
-                                                    req.extensions_mut().insert(result_ctx);
-                                                });
-                                            }
-                                            Err(e) => return Err(Error::DBError { source: format!("{:?}", e) }),
-                                        };
-                                }
-                                Err(e) => return Err(Error::DBError { source: format!("{:?}", e) }),
-                        };
-                    }
-                    _ => return Err(Error::DBError { source: "Multiple users found".to_string() }),
-                }
-            }
-            Err(e) => {
-                return Err(Error::DBError { source: format!("{:?}", e) });
-            }
-        };
+        .fetch_all(pool)
+        .await
+        .map_err(|e| Error::DBError {
+            source: format!("{:?}", e),
+        })?;
+
+    if rows.len() == 1 {
+        let row = &rows[0];
+        let userid: i32 = row.get("user_id");
+        let db_name: String = row.get("name");
+        let db_picture: String = row.get("picture");
+        Ok(Ctx::new(userid.to_string(), db_name, db_picture))
+    } else if rows.is_empty() {
+        // Insert new user.
+        sqlx::query(
+            "INSERT INTO users (oauth_type, sub, name, picture)
+             VALUES ('google', $1, $2, $3)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(picture)
+        .execute(pool)
+        .await
+        .map_err(|e| Error::DBError {
+            source: format!("{:?}", e),
+        })?;
+
+        // Query again for the newly inserted user.
+        let rows = sqlx::query("SELECT * FROM users WHERE sub = $1")
+            .bind(id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| Error::DBError {
+                source: format!("{:?}", e),
+            })?;
+
+        if let Some(row) = rows.first() {
+            let userid: i32 = row.get("user_id");
+            let db_name: String = row.get("name");
+            let db_picture: String = row.get("picture");
+            Ok(Ctx::new(userid.to_string(), db_name, db_picture))
+        } else {
+            Err(Error::DBError {
+                source: "Failed to retrieve newly inserted user".into(),
+            })
+        }
+    } else {
+        Err(Error::DBError {
+            source: "Multiple users found".into(),
+        })
+    }
+}
+
+/// Middleware that *requires* an auth token and sets a valid context.
+/// Returns an error if the token is missing or invalid.
+pub async fn mw_ctx_resolver<B>(
+    State(_mc): State<Arc<SessionController>>,
+    cookies: Cookies,
+    Extension(pool): Extension<PgPool>,
+    mut req: Request<B>,
+    next: Next<B>,
+) -> Result<Response> {
+    println!("->> {:12} - ctx_resolver", "Middleware");
+
+    let auth_token = cookies
+        .get(AUTH_TOKEN)
+        .ok_or(Error::AuthFailNoToken)?
+        .value()
+        .to_string();
+
+    let ctx = resolve_ctx_with_auth_token(&pool, &auth_token).await?;
+    // Insert the successful context (wrapped in Ok) into extensions.
+    req.extensions_mut().insert(Ok::<Ctx, Error>(ctx));
 
     Ok(next.run(req).await)
 }
 
+/// Middleware that attempts to resolve a context if an auth token is present.
+/// Otherwise, it simply inserts a default “anonymous” context.
 pub async fn mw_optional_ctx_resolver<B>(
     State(_mc): State<Arc<SessionController>>,
     cookies: Cookies,
@@ -137,74 +150,22 @@ pub async fn mw_optional_ctx_resolver<B>(
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response> {
-
     println!("->> {:12} - optional_ctx_resolver", "Middleware");
 
-    // Default context for anonymous users
     let default_ctx = Ctx::new("-1".to_string(), "anonymous".to_string(), "".to_string());
-    let mut ctx_result: std::result::Result<Ctx, Error> = Ok(default_ctx.clone());
-
-    // Attempt to authenticate if the token exists
-    if let Some(auth_token) = cookies.get(AUTH_TOKEN).map(|c| c.value().to_string()) {
-        let result: Result<Ctx> = async {
-            let client = reqwest::Client::new();
-            let response = client
-                .get("https://www.googleapis.com/userinfo/v2/me")
-                .bearer_auth(&auth_token)
-                .send()
-                .await
-                .map_err(|_| Error::AuthFailInvalidToken)?;
-
-            let info = response
-                .json::<Value>()
-                .await
-                .map_err(|_| Error::AuthFailInvalidToken)?;
-
-            let id = info.get("id").and_then(Value::as_str).unwrap_or("");
-            let name = info.get("name").and_then(Value::as_str).unwrap_or("");
-            let picture = info.get("picture").and_then(Value::as_str).unwrap_or("");
-
-            if id.is_empty() {
-                return Err(Error::AuthFailInvalidToken);
-            }
-
-            // Check if user exists in the database
-            let rows = sqlx::query("SELECT * FROM users WHERE sub = $1")
-                .bind(id)
-                .fetch_all(&pool)
-                .await
-                .map_err(|e| Error::DBError {
-                    source: format!("{:?}", e),
-                })?;
-
-            match rows.len() {
-                1 => {
-                    let row = &rows[0];
-                    let userid: i32 = row.get("user_id");
-                    let name: String = row.get("name");
-                    let picture: String = row.get("picture");
-                    Ok(Ctx::new(userid.to_string(), name, picture))
-                }
-                _ => // pass
-                    Ok(default_ctx.clone()),
-            }
-        }
-        .await;
-
-        match result {
-            Ok(ctx) => ctx_result = Ok(ctx),
+    let ctx_result: Result<Ctx> = if let Some(cookie) = cookies.get(AUTH_TOKEN) {
+        match resolve_ctx_with_auth_token(&pool, cookie.value()).await {
+            Ok(ctx) => Ok(ctx),
             Err(e) => {
-                // Log error but proceed with default context
                 eprintln!("Authentication error in optional resolver: {:?}", e);
-                ctx_result = Ok(default_ctx);
+                Ok(default_ctx)
             }
         }
-    }
+    } else {
+        Ok(default_ctx)
+    };
 
-    // Insert the determined context into request extensions
-    // println!("->> {:12} - optional_ctx_resolver: {:?}", "Middleware", ctx_result);
     req.extensions_mut().insert(ctx_result);
-
     Ok(next.run(req).await)
 }
 
@@ -212,8 +173,7 @@ pub async fn mw_optional_ctx_resolver<B>(
 impl<S: Send + Sync> FromRequestParts<S> for Ctx {
     type Rejection = Error;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self> {
-        // this function is run twice
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, _state: &S) -> Result<Self> {
         parts
             .extensions
             .get::<Result<Ctx>>()

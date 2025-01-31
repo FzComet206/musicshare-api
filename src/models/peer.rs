@@ -19,10 +19,11 @@ use tokio::sync::Mutex;
 use tokio::sync::Notify;
 
 use std::sync::Arc;
+use serde::Serialize;
 
 use crate::utils::error::{Error, Result};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Listener {
     pub name: String,
     pub picture: String,
@@ -102,6 +103,7 @@ impl PeerConnection {
             if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
                 // Set active to false
                 println!("->> {:<12} - {:?} is connected", "PeerConnection", name);
+                println!("");
             }
 
             Box::pin(async move {

@@ -38,6 +38,7 @@ use tokio::sync::broadcast;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use tokio::time::Instant;
 
 use crate::media::file_manager::{ FileManager, FMDownloadParams };
 use crate::models::queue::PlayQueue;
@@ -58,6 +59,7 @@ pub struct SessionStats {
 #[derive(Clone, Debug)]
 pub struct Session {
     pub uuid: String,
+    pub start_time: Instant,
     pub peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     pub broadcaster: BroadcasterHandle,
     pub queue: Arc<Mutex<PlayQueue>>,
@@ -74,6 +76,7 @@ impl Session {
 
         let session = Self {
             uuid: session_id,
+            start_time: tokio::time::Instant::now(),
             peer_connections, 
             broadcaster: broadcaster_handle,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
@@ -325,6 +328,11 @@ impl Session {
         Ok(())
     }
 
+    pub async fn get_session_start_time(&self) -> Result<u64> {
+        // convert Instant to u64
+        Ok(self.start_time.elapsed().as_secs().into())
+    }
+
     pub async fn get_number_of_listeners(&self) -> Result<usize> {
         let peer_connections = self.peer_connections.lock().await;
         let mut num_active = 0;
@@ -337,7 +345,7 @@ impl Session {
         Ok(num_active)
     }
 
-    pub async fn get_all_listeners_profile(&self) -> Result<Vec<Listener>> {
+    pub async fn get_listeners(&self) -> Result<Vec<Listener>> {
         let peer_connections = self.peer_connections.lock().await;
         let mut listeners = Vec::new();
         for (_, pc) in peer_connections.iter() {
@@ -346,7 +354,6 @@ impl Session {
         }
         Ok(listeners)
     }
-
 }
 
 
@@ -404,7 +411,7 @@ impl SessionController{
         sessions.insert(session_id.clone(), Some(session.clone()));
 
         let mut session_owners = self.session_owners.lock().await;
-        session_owners.insert(user_id.clone(), session_id.clone());
+        session_owners.insert(session_id.clone(), user_id.clone());
 
         Ok(session_id)
     }
@@ -459,6 +466,16 @@ impl SessionController{
     pub async fn get_user_session(&self, user_id: String) -> Result<String> {
         let session_owners = self.session_owners.lock().await;
         match session_owners.get(&user_id) {
+            Some(id) => {
+                Ok(id.clone())
+            },
+            None => Ok("".to_string()),
+        }
+    }
+
+    pub async fn get_session_owner(&self, session_id: String) -> Result<String> {
+        let session_owners = self.session_owners.lock().await;
+        match session_owners.get(&session_id) {
             Some(id) => {
                 Ok(id.clone())
             },
