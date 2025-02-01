@@ -113,7 +113,6 @@ impl PeerConnection {
             // );
             let active = Arc::clone(&active);
 
-
             if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
                 // Set active to false
 
@@ -126,16 +125,15 @@ impl PeerConnection {
             Box::pin(async move {
 
                 if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected {
-                    // Set active to false
+                    let mut active = active.lock().await;
+                    *active = false;
+
                     match _update.send("disconnect".to_string()) {
                         Ok(_) => {},
                         Err(err) => {
                             eprintln!("Error: {:?}", err);
                         },
                     }
-                    let mut active = active.lock().await;
-                    *active = false;
-                    // notify via sse
                 }
             })
         }));
