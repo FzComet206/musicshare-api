@@ -364,7 +364,7 @@ impl Session {
             if *pc.active.lock().await {
                 let listener = pc.get_profile().await?;
                 // if listener.id not in listeners
-                if !listeners.contains(&listener) || listener.id == "-1" {
+                if !listeners.contains(&listener) {
                     listeners.push(listener);
                 }
             }
