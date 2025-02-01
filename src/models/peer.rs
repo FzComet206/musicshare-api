@@ -20,6 +20,7 @@ use tokio::sync::Notify;
 
 use std::sync::Arc;
 use serde::Serialize;
+use tokio::sync::broadcast;
 
 use crate::utils::error::{Error, Result};
 
@@ -38,12 +39,13 @@ pub struct PeerConnection{
     pub active: Arc<Mutex<bool>>,
     pub gathering_state: Arc<Notify>,
     pub is_gathering_complete: Arc<Mutex<bool>>,
+    pub update: Arc<Mutex<broadcast::Sender<String>>>,
     pub listener: Listener,
 }
 
 impl PeerConnection {
 
-    pub async fn new(listener: Listener) -> Self {
+    pub async fn new(listener: Listener, update: Arc<Mutex<broadcast::Sender<String>>>) -> Self {
 
         let mut m = MediaEngine::default();
         m.register_default_codecs();
@@ -71,6 +73,7 @@ impl PeerConnection {
             active: Arc::new(Mutex::new(true)),
             gathering_state: Arc::new(Notify::new()),
             is_gathering_complete: Arc::new(Mutex::new(false)),
+            update,
             listener,
         }
     }
@@ -92,25 +95,47 @@ impl PeerConnection {
         // Use an Arc<Mutex> for `self.active` to make it thread-safe and `'static`
         let active = Arc::clone(&self.active); // Assume self.active is Arc<Mutex<bool>>
         let name = self.listener.name.clone();
+        match self.update.lock().await.send("connect".to_string()) {
+            Ok(_) => {},
+            Err(err) => {
+                eprintln!("Error: {:?}", err);
+            },
+        }
+
+        let update = self.update.lock().await.clone();
 
         pc.on_peer_connection_state_change(Box::new(move |state| {
+
+            let _update = update.clone();
             // println!(
                 // "->> {:<12} Peer Connection State Change: {:?}",
                 // "PeerConnection", state
             // );
             let active = Arc::clone(&active);
 
+
             if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
                 // Set active to false
+
                 println!("->> {:<12} - {:?} is connected", "PeerConnection", name);
                 println!("");
+
+                // notify via sse
             }
 
             Box::pin(async move {
+
                 if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected {
                     // Set active to false
+                    match _update.send("disconnect".to_string()) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            eprintln!("Error: {:?}", err);
+                        },
+                    }
                     let mut active = active.lock().await;
                     *active = false;
+                    // notify via sse
                 }
             })
         }));

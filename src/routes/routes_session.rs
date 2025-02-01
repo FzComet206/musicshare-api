@@ -248,9 +248,10 @@ async fn get_session_stats(
 ) -> Result<Json<Value>> {
     println!("->> {:<12} - get_session_stats", "Handler");
 
-    let session_owner = mc.get_session_owner(params.session_id.clone()).await?;
-
+    // let session_owner = mc.get_session_owner(params.session_id.clone()).await?;
     let session = mc.get_session(params.session_id).await?;
+
+    let session_owner = session.get_session_owner().await?;
     let session_start_time = session.get_session_start_time().await?;
     let number_of_listeners = session.get_number_of_listeners().await?;
     let listeners = session.get_listeners().await?;

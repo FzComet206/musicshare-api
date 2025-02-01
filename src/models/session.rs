@@ -49,6 +49,15 @@ use crate::models::peer::{
     Listener,
 };
 
+use std::time::{ SystemTime, UNIX_EPOCH };
+
+#[derive(Clone, Debug, Serialize)]
+pub struct User {
+    pub id: String,
+    pub name: String,
+    pub picture: String,
+}
+
 pub struct SessionStats {
     pub session_owner: Listener,
     pub num_listeners: usize,
@@ -59,24 +68,26 @@ pub struct SessionStats {
 #[derive(Clone, Debug)]
 pub struct Session {
     pub uuid: String,
-    pub start_time: Instant,
+    pub start_time: u64,
+    pub owner: User,
     pub peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     pub broadcaster: BroadcasterHandle,
     pub queue: Arc<Mutex<PlayQueue>>,
     pub update: Arc<Mutex<broadcast::Sender<String>>>,
-    // later add user id and time lapsed
 } 
 
 impl Session {
     pub async fn new(
         session_id: String, 
+        owner: User,
         broadcaster_handle: BroadcasterHandle,
         peer_connections: Arc<Mutex<HashMap<String, PeerConnection>>>,
     ) -> Result<Self> {
 
         let session = Self {
             uuid: session_id,
-            start_time: tokio::time::Instant::now(),
+            owner,
+            start_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u64,
             peer_connections, 
             broadcaster: broadcaster_handle,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
@@ -90,7 +101,7 @@ impl Session {
 
     pub async fn create_peer(&mut self, listener: Listener) -> Result<(String, oneshot::Receiver<()>)> {
 
-        let mut pc = PeerConnection::new(listener).await;
+        let mut pc = PeerConnection::new(listener, self.update.clone()).await;
         let uuid = pc.uuid.clone();
 
         let mut peer_connections = self.peer_connections.lock().await;
@@ -167,10 +178,10 @@ impl Session {
         match queue.add(key, title) {
             Next(key) => {
                 self.play(key).await?;
-                self.ping(queue.get_id()).await?;
+                self.ping("queue".to_string()).await?;
             },
-            Pass => self.ping(queue.get_id()).await?,
-            _ => self.ping(queue.get_id()).await?,
+            Pass => self.ping("queue".to_string()).await?,
+            _ => self.ping("queue".to_string()).await?,
         }
         Ok(())
     }
@@ -180,17 +191,17 @@ impl Session {
         match queue.remove(key) {
             Next(key) => {
                 self.play(key).await?;
-                self.ping(queue.get_id()).await?;
+                self.ping("queue".to_string()).await?;
             },
             Stop => {
                 self.clean_active_file().await?;
-                self.ping(queue.get_id()).await?;
+                self.ping("queue".to_string()).await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
             },
             Pass => { 
-                self.ping(queue.get_id()).await?;
+                self.ping("queue".to_string()).await?;
             }
         }
         Ok(())
@@ -200,11 +211,11 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.reorder(old_index, new_index) {
             Next(key) => {
-                self.ping(queue.get_id()).await?;
+                self.ping("queue".to_string()).await?;
                 self.play(key).await?;
             },
-            Pass => self.ping(queue.get_id()).await?,
-            _ => self.ping(queue.get_id()).await?,
+            Pass => self.ping("queue".to_string()).await?,
+            _ => self.ping("queue".to_string()).await?,
         }
         Ok(())
     }
@@ -213,10 +224,10 @@ impl Session {
         let mut queue = self.queue.lock().await;
         let key = queue.next();
         if key.is_empty() {
-            self.ping(queue.get_id()).await?;
+            self.ping("queue".to_string()).await?;
             self.clean_active_file().await?;
         } else {
-            self.ping(queue.get_id()).await?;
+            self.ping("queue".to_string()).await?;
             self.play(key).await?;
         }
         Ok(())
@@ -226,10 +237,10 @@ impl Session {
         let mut queue = self.queue.lock().await;
         let key = queue.prev();
         if key.is_empty() {
-            self.ping(queue.get_id()).await?;
+            self.ping("queue".to_string()).await?;
             self.clean_active_file().await?;
         } else {
-            self.ping(queue.get_id()).await?;
+            self.ping("queue".to_string()).await?;
             self.play(key).await?;
         }
         Ok(())
@@ -254,6 +265,7 @@ impl Session {
         Ok(())
     }
 
+    // spawn a running task to check for broadcaster end event
     pub async fn autoplay_loop(&self) -> Result<()> {
 
         // let mut event_rx = self.broadcaster.event_rx.lock().await;
@@ -319,10 +331,10 @@ impl Session {
         Ok(update.clone())
     }
 
-    pub async fn ping(&self, index: String) -> Result<()> {
+    pub async fn ping(&self, msg: String) -> Result<()> {
         let sender = self.update.lock().await;
 
-        sender.send(index).map_err(|e| {
+        sender.send(msg).map_err(|e| {
             Error::SSEError { msg: e.to_string() }
         })?;
         Ok(())
@@ -330,7 +342,7 @@ impl Session {
 
     pub async fn get_session_start_time(&self) -> Result<u64> {
         // convert Instant to u64
-        Ok(self.start_time.elapsed().as_secs().into())
+        Ok(self.start_time)
     }
 
     pub async fn get_number_of_listeners(&self) -> Result<usize> {
@@ -349,10 +361,16 @@ impl Session {
         let peer_connections = self.peer_connections.lock().await;
         let mut listeners = Vec::new();
         for (_, pc) in peer_connections.iter() {
-            let listener = pc.get_profile().await?;
-            listeners.push(listener);
+            if *pc.active.lock().await {
+                let listener = pc.get_profile().await?;
+                listeners.push(listener);
+            }
         }
         Ok(listeners)
+    }
+
+    pub async fn get_session_owner(&self) -> Result<User> {
+        Ok(self.owner.clone())
     }
 }
 
@@ -360,7 +378,7 @@ impl Session {
 #[derive(Clone, Debug)]
 pub struct SessionController{
     pub sessions: Arc<Mutex<HashMap<String, Option<Session>>>>,
-    pub session_owners: Arc<Mutex<HashMap<String, String>>>,
+    pub user_sessions: Arc<Mutex<HashMap<String, String>>>,
     pub file_manager: Arc<Mutex<FileManager>>,
 }
 
@@ -369,12 +387,12 @@ impl SessionController{
     pub async fn new() -> Result<Self> {
         Ok(Self {
             sessions: Arc::default(),
-            session_owners: Arc::default(),
+            user_sessions: Arc::default(),
             file_manager: Arc::new(Mutex::new(FileManager::new().await?)),
         })
     }
 
-    pub async fn create_session(&self, user_id: String) -> Result<(String)> {
+    pub async fn create_session(&self, user_id: String, user: User) -> Result<(String)> {
 
         let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -405,13 +423,18 @@ impl SessionController{
             event_rx: Arc::new(Mutex::new(event_rx))
         };
         // create broadcaster and spin it on a task
-        let mut session = Session::new(session_id.clone(), broadcaster_handle, Arc::clone(&peer_connections)).await?;
+        let mut session = Session::new(
+            session_id.clone(), 
+            user,
+            broadcaster_handle, 
+            Arc::clone(&peer_connections)
+        ).await?;
 
         let mut sessions = self.sessions.lock().await;
         sessions.insert(session_id.clone(), Some(session.clone()));
 
-        let mut session_owners = self.session_owners.lock().await;
-        session_owners.insert(session_id.clone(), user_id.clone());
+        let mut user_sessions = self.user_sessions.lock().await;
+        user_sessions.insert(user_id.clone(), session_id.clone());
 
         Ok(session_id)
     }
@@ -443,9 +466,10 @@ impl SessionController{
         Ok(())
     }
 
+    // check if a user has a running session
     pub async fn check_user_has_session(&self, user_id: String) -> Result<bool> {
-        let session_owners = self.session_owners.lock().await;
-        match session_owners.get(&user_id) {
+        let user_sessions = self.user_sessions.lock().await;
+        match user_sessions.get(&user_id) {
             Some(id) => {
                 Ok(true)
             },
@@ -453,9 +477,10 @@ impl SessionController{
         }
     }
 
+    // check if a user owns a session
     pub async fn check_user_own_session(&self, user_id: String, session_id: String) -> Result<bool> {
-        let session_owners = self.session_owners.lock().await;
-        match session_owners.get(&user_id) {
+        let user_sessions = self.user_sessions.lock().await;
+        match user_sessions.get(&user_id) {
             Some(id) => {
                 Ok(*id == session_id)
             },
@@ -463,19 +488,10 @@ impl SessionController{
         }
     }
 
+    // return the running session of a user
     pub async fn get_user_session(&self, user_id: String) -> Result<String> {
-        let session_owners = self.session_owners.lock().await;
-        match session_owners.get(&user_id) {
-            Some(id) => {
-                Ok(id.clone())
-            },
-            None => Ok("".to_string()),
-        }
-    }
-
-    pub async fn get_session_owner(&self, session_id: String) -> Result<String> {
-        let session_owners = self.session_owners.lock().await;
-        match session_owners.get(&session_id) {
+        let user_sessions = self.user_sessions.lock().await;
+        match user_sessions.get(&user_id) {
             Some(id) => {
                 Ok(id.clone())
             },

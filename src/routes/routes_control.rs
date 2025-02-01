@@ -25,6 +25,7 @@ use crate::utils::error::{ Error, Result, ClientError };
 use crate::models::SessionController;
 use crate::ctx::Ctx;
 use crate::media::file_manager::{ FileManager, FMDownloadParams};
+use crate::models::session::User;
 
 #[derive(Debug, Deserialize)]
 struct PlayTestRequest {
@@ -110,7 +111,14 @@ async fn create_session(
         return Err(Error::SessionExists);
     }
 
-    let mut sessionid = mc.create_session(id).await?;
+    let mut sessionid = mc.create_session(
+        id,
+        User {
+            id: ctx.id(),
+            name: ctx.name(),
+            picture: ctx.picture(),
+        }
+    ).await?;
     
     Ok(Json(json!({
         "status": "ok",
