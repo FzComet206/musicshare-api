@@ -68,7 +68,6 @@ struct SessionID {
 }
 
 // this is a no auth route layer
-
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
         .route("/get_offer", get(get_offer))

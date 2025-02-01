@@ -95,7 +95,7 @@ impl PeerConnection {
         // Use an Arc<Mutex> for `self.active` to make it thread-safe and `'static`
         let active = Arc::clone(&self.active); // Assume self.active is Arc<Mutex<bool>>
         let name = self.listener.name.clone();
-        match self.update.lock().await.send("connect".to_string()) {
+        match self.update.lock().await.send("connection".to_string()) {
             Ok(_) => {},
             Err(err) => {
                 eprintln!("Error: {:?}", err);
@@ -128,7 +128,7 @@ impl PeerConnection {
                     let mut active = active.lock().await;
                     *active = false;
 
-                    match _update.send("disconnect".to_string()) {
+                    match _update.send("connection".to_string()) {
                         Ok(_) => {},
                         Err(err) => {
                             eprintln!("Error: {:?}", err);

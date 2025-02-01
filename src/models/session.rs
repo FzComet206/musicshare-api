@@ -178,10 +178,10 @@ impl Session {
         match queue.add(key, title) {
             Next(key) => {
                 self.play(key).await?;
-                self.ping("queue".to_string()).await?;
+                self.ping(queue.get_id()).await?;
             },
-            Pass => self.ping("queue".to_string()).await?,
-            _ => self.ping("queue".to_string()).await?,
+            Pass => self.ping(queue.get_id()).await?,
+            _ => self.ping(queue.get_id()).await?,
         }
         Ok(())
     }
@@ -191,17 +191,17 @@ impl Session {
         match queue.remove(key) {
             Next(key) => {
                 self.play(key).await?;
-                self.ping("queue".to_string()).await?;
+                self.ping(queue.get_id()).await?;
             },
             Stop => {
                 self.clean_active_file().await?;
-                self.ping("queue".to_string()).await?;
+                self.ping(queue.get_id()).await?;
             },
             NotFound => {
                 return Err(Error::QueueError { msg: "Key not found".to_string() });
             },
             Pass => { 
-                self.ping("queue".to_string()).await?;
+                self.ping(queue.get_id()).await?;
             }
         }
         Ok(())
@@ -211,11 +211,11 @@ impl Session {
         let mut queue = self.queue.lock().await;
         match queue.reorder(old_index, new_index) {
             Next(key) => {
-                self.ping("queue".to_string()).await?;
+                self.ping(queue.get_id()).await?;
                 self.play(key).await?;
             },
-            Pass => self.ping("queue".to_string()).await?,
-            _ => self.ping("queue".to_string()).await?,
+            Pass => self.ping(queue.get_id()).await?,
+            _ => self.ping(queue.get_id()).await?,
         }
         Ok(())
     }
@@ -224,10 +224,10 @@ impl Session {
         let mut queue = self.queue.lock().await;
         let key = queue.next();
         if key.is_empty() {
-            self.ping("queue".to_string()).await?;
+            self.ping(queue.get_id()).await?;
             self.clean_active_file().await?;
         } else {
-            self.ping("queue".to_string()).await?;
+            self.ping(queue.get_id()).await?;
             self.play(key).await?;
         }
         Ok(())
@@ -237,10 +237,10 @@ impl Session {
         let mut queue = self.queue.lock().await;
         let key = queue.prev();
         if key.is_empty() {
-            self.ping("queue".to_string()).await?;
+            self.ping(queue.get_id()).await?;
             self.clean_active_file().await?;
         } else {
-            self.ping("queue".to_string()).await?;
+            self.ping(queue.get_id()).await?;
             self.play(key).await?;
         }
         Ok(())
