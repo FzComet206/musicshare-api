@@ -79,6 +79,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/queue", get(get_queue))
         .route("/queue_notify", get(queue_notify))
         .route("/session_stats", get(get_session_stats))
+        .route("/session_listeners", get(get_session_listeners))
         .with_state(mc)
 }
 
@@ -260,6 +261,23 @@ async fn get_session_stats(
         "status": "ok",
         "session_owner": session_owner,
         "session_start_time": session_start_time,
+        "number_of_listeners": number_of_listeners,
+        "listeners": listeners,
+    })))
+}
+
+async fn get_session_listeners(
+    State(mc): State<Arc<SessionController>>,
+    Query(params): Query<SessionID>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - get_session_listeners", "Handler");
+
+    let session = mc.get_session(params.session_id).await?;
+    let number_of_listeners = session.get_number_of_listeners().await?;
+    let listeners = session.get_listeners().await?;
+
+    Ok(Json(json!({
+        "status": "ok",
         "number_of_listeners": number_of_listeners,
         "listeners": listeners,
     })))

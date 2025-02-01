@@ -76,6 +76,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/next_in_queue", post(next_in_queue))
         .route("/prev_in_queue", post(prev_in_queue))
         .route("/download_notify", get(download_notify))
+        .route("/delete_session", get(delete_session))
         .with_state(mc)
 }
 
@@ -384,5 +385,28 @@ async fn prev_in_queue(
     Ok(Json(json!({
         "status": "ok",
         "message": "previous",
+    }))
+)}
+
+async fn delete_session(
+    ctx: Ctx,
+    State(mc): State<Arc<SessionController>>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - delete_session", "Handler");
+
+    let user_id = ctx.id();
+    
+    // check if user has session
+    let session_id = mc.get_user_session(user_id.clone()).await?;
+
+    if session_id == "" {
+        return Err(Error::SessionNotFound { id: "some session id".to_string() });
+    }
+
+    mc.delete_session(session_id.clone()).await?;
+    
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "session deleted",
     }))
 )}

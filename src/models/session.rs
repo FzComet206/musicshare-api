@@ -87,7 +87,7 @@ impl Session {
         let session = Self {
             uuid: session_id,
             owner,
-            start_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u64,
+            start_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
             peer_connections, 
             broadcaster: broadcaster_handle,
             queue: Arc::new(Mutex::new(PlayQueue::new())),
@@ -363,7 +363,10 @@ impl Session {
         for (_, pc) in peer_connections.iter() {
             if *pc.active.lock().await {
                 let listener = pc.get_profile().await?;
-                listeners.push(listener);
+                // if listener.id not in listeners
+                if !listeners.contains(&listener) || listener.id == "-1" {
+                    listeners.push(listener);
+                }
             }
         }
         Ok(listeners)
@@ -437,6 +440,26 @@ impl SessionController{
         user_sessions.insert(user_id.clone(), session_id.clone());
 
         Ok(session_id)
+    }
+
+    pub async fn delete_session(&self, session_id: String) -> Result<()> {
+        let mut sessions = self.sessions.lock().await;
+        let mut user_sessions = self.user_sessions.lock().await;
+
+        match sessions.get(&session_id) {
+            Some(session) => {
+                match session {
+                    Some(session) => {
+                        session.clean_active_file().await?;
+                        sessions.remove(&session_id);
+                        user_sessions.retain(|k, v| *v != session_id);
+                    },
+                    None => return Err(Error::SessionNotFound { id : session_id }),
+                }
+            },
+            None => return Err(Error::SessionNotFound { id: session_id }),
+        }
+        Ok(())
     }
 
     pub async fn get_session(&self, id: String) -> Result<Session> {

@@ -24,7 +24,7 @@ use tokio::sync::broadcast;
 
 use crate::utils::error::{Error, Result};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct Listener {
     pub name: String,
     pub picture: String,
