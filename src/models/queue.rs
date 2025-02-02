@@ -199,4 +199,12 @@ impl PlayQueue {
     pub fn has_key(&self, key: String) -> bool {
         self.queue.iter().any(|x| x[0] == key)
     }
+
+    pub fn get_title(&self, index: usize) -> String {
+        if index >= self.queue.len() {
+            return "".to_string();
+        }
+
+        self.queue[index][1].clone()
+    }
 }

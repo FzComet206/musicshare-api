@@ -433,6 +433,19 @@ impl Session {
             _ => Ok("".to_string()),
         }
     }
+
+    pub async fn get_top_queue(&self) -> Result<Vec<String>> {
+        // get the title of up to three top items in the queue
+        let queue = self.queue.lock().await;
+        let mut top = Vec::new();
+        for i in 0..3 {
+            match queue.get_title(i) {
+                title => top.push(title),
+                _ => break,
+            }
+        }
+        Ok(top)
+    }
 }
 
 #[derive(Clone, Debug)]

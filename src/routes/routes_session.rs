@@ -5,6 +5,7 @@ use crate::models::session::{
 
 use crate::Ctx;
 use crate::models::peer::Listener;
+use crate::models::session::User;
 
 use crate::Result;
 use serde::{
@@ -67,6 +68,21 @@ struct SessionID {
     session_id: String,
 }
 
+#[derive(Debug, Serialize)]
+struct SessionPreview {
+    session_id: String,
+    session_owner: User,
+    session_start_time: u64,
+    number_of_listeners: usize,
+    listeners: Vec<Listener>,
+    top_queue: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BrowseSessions {
+    sessions: Vec<SessionPreview>,
+}
+
 // this is a no auth route layer
 pub fn routes(mc: Arc<SessionController>) -> Router {
     Router::new()
@@ -80,6 +96,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/queue_notify", get(queue_notify))
         .route("/session_stats", get(get_session_stats))
         .route("/session_listeners", get(get_session_listeners))
+        .route("/browse", get(browse_sesions))
         .with_state(mc)
 }
 
@@ -306,5 +323,36 @@ async fn get_initial_queue_position(
     Ok(Json(json!({
         "status": "ok",
         "index": queue_position,
+    })))
+}
+
+async fn browse_sesions(
+    State(mc): State<Arc<SessionController>>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - browse_sesions", "Handler");
+
+    let sessions = mc.get_sessions().await?;
+    let mut result_sessions = Vec::new();
+
+    for session in sessions {
+        let session_owner: User = session.get_session_owner().await?;
+        let session_start_time = session.get_session_start_time().await?;
+        let number_of_listeners = session.get_number_of_listeners().await?;
+        let listeners = session.get_listeners().await?;
+        let top_queue = session.get_top_queue().await?;
+
+        result_sessions.push(SessionPreview {
+            session_id: session.uuid.clone(),
+            session_owner,
+            session_start_time,
+            number_of_listeners,
+            listeners,
+            top_queue,
+        });
+    }
+
+    Ok(Json(json!({
+        "status": "ok",
+        "sessions": result_sessions,
     })))
 }
