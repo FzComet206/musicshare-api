@@ -409,6 +409,8 @@ async fn delete_session(
         return Err(Error::SessionNotFound { id: "some session id".to_string() });
     }
 
+    let session = mc.get_session(session_id.clone()).await?;
+
     mc.delete_session(session_id.clone()).await?;
     
     Ok(Json(json!({
