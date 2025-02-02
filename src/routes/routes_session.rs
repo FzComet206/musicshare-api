@@ -75,6 +75,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/get_ice", post(get_ice))
         .route("/set_ice", post(add_ice))
         .route("/state", get(server_state))
+        .route("/queue_position", get(get_initial_queue_position))
         .route("/queue", get(get_queue))
         .route("/queue_notify", get(queue_notify))
         .route("/session_stats", get(get_session_stats))
@@ -290,5 +291,20 @@ async fn get_session_listeners(
         "status": "ok",
         "number_of_listeners": number_of_listeners,
         "listeners": listeners,
+    })))
+}
+
+async fn get_initial_queue_position(
+    State(mc): State<Arc<SessionController>>,
+    Query(params): Query<SessionID>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - get_initial_queue_position", "Handler");
+
+    let session = mc.get_session(params.session_id).await?;
+    let queue_position = session.get_queue_position().await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "index": queue_position,
     })))
 }

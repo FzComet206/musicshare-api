@@ -70,7 +70,7 @@ impl PeerConnection {
             uuid: uuid::Uuid::new_v4().to_string(),
             peer_connection: Arc::new(peer_connection),
             ice_candidates: Arc::new(Mutex::new(Vec::new())),
-            active: Arc::new(Mutex::new(true)),
+            active: Arc::new(Mutex::new(false)),
             gathering_state: Arc::new(Notify::new()),
             is_gathering_complete: Arc::new(Mutex::new(false)),
             update,
@@ -93,7 +93,6 @@ impl PeerConnection {
         let pc = &mut self.peer_connection;
 
         // Use an Arc<Mutex> for `self.active` to make it thread-safe and `'static`
-        let active = Arc::clone(&self.active); // Assume self.active is Arc<Mutex<bool>>
         let name = self.listener.name.clone();
         match self.update.lock().await.send("connection".to_string()) {
             Ok(_) => {},
@@ -102,30 +101,32 @@ impl PeerConnection {
             },
         }
 
+        let active = Arc::clone(&self.active); // Assume self.active is Arc<Mutex<bool>>
         let update = self.update.lock().await.clone();
 
         pc.on_peer_connection_state_change(Box::new(move |state| {
 
             let _update = update.clone();
-            // println!(
-                // "->> {:<12} Peer Connection State Change: {:?}",
-                // "PeerConnection", state
-            // );
             let active = Arc::clone(&active);
-
-            if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
-                // Set active to false
-
-                println!("->> {:<12} - {:?} is connected", "PeerConnection", name);
-                println!("");
-
-                // notify via sse
-            }
 
             Box::pin(async move {
 
+                let mut active = active.lock().await;
+                if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
+
+                    *active = true;
+                    println!("");
+
+                    match _update.send("connection".to_string()) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            eprintln!("Error: {:?}", err);
+                        },
+                    }
+                }
+
                 if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected {
-                    let mut active = active.lock().await;
+
                     *active = false;
 
                     match _update.send("connection".to_string()) {

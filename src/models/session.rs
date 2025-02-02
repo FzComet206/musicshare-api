@@ -169,6 +169,11 @@ impl Session {
         Ok(peers)
     }
 
+    pub async fn get_queue_position(&self) -> Result<String> {
+        let queue = self.queue.lock().await;
+        Ok(queue.get_id())
+    }
+
     pub async fn get_queue(&self) -> Result<Vec<Vec<String>>> {
         let queue = self.queue.lock().await;
         Ok(queue.get_all())
@@ -386,10 +391,7 @@ impl Session {
         for (_, pc) in peer_connections.iter() {
             if *pc.active.lock().await {
                 let listener = pc.get_profile().await?;
-                // if listener.id not in listeners
-                if !listeners.contains(&listener) {
-                    listeners.push(listener);
-                }
+                listeners.push(listener);
             }
         }
         Ok(listeners)
