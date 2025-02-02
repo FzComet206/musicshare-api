@@ -338,6 +338,12 @@ impl Session {
         })?;
 
         let session_dir = format!("./sessions/{}", self.uuid.clone());
+
+        // check if the session directory exists
+        if !Path::new(&session_dir).exists() {
+            return Ok(());
+        }
+
         let mut entries = match fs::read_dir(session_dir.clone()).await {
             Ok(entries) => entries,
             Err(e) => return Err(Error::ResetFileError { msg: e.to_string() }),
@@ -350,6 +356,20 @@ impl Session {
                 fs::remove_file(path).await?;
             }
         }
+        Ok(())
+    }
+
+    pub async fn clean_session_dir(&self) -> Result<()> {
+        let session_dir = format!("./sessions/{}", self.uuid.clone());
+
+        // check if the session directory exists
+        if !Path::new(&session_dir).exists() {
+            return Ok(());
+        }
+
+        // remove the session directory
+        fs::remove_dir_all(session_dir).await?;
+
         Ok(())
     }
 
@@ -488,6 +508,7 @@ impl SessionController{
                 match session {
                     Some(session) => {
                         session.clean_active_file().await?;
+                        session.clean_session_dir().await?;
                         session.ping("end".to_string()).await?;
                         sessions.remove(&session_id);
                         user_sessions.retain(|k, v| *v != session_id);
