@@ -108,8 +108,14 @@ impl Broadcaster {
                     if key.is_empty() {
                         continue;
                     }
-                    let file_path = self.set_active_file(key.clone()).await?;
-                    self.broadcast(&file_path).await?;
+                    match self.set_active_file(key.clone()).await {
+                        Ok(file_path) => {
+                            self.broadcast(&file_path).await?;
+                        },
+                        Err(e) => {
+                            println!("Error setting active file: {:?}", e);
+                        }
+                    }
                 }
                 BroadcasterCommand::Pause => {
                 }
@@ -117,18 +123,42 @@ impl Broadcaster {
                     self.stop().await;
                 }
                 BroadcasterCommand::Attach { peer_id, reply } => {
+                    println!("============= Attaching peer: {}", peer_id);
+
                     let pcs = self.peer_connections.lock().await;
-                    let pc = pcs.get(&peer_id).unwrap();
-                    pc.add_track(self.audio_track.clone()).await;
-                    let _ = reply.send(());
+                    match pcs.get(&peer_id) {
+                        Some(pc) => {
+                            match pc.add_track(self.audio_track.clone()).await {
+                                Ok(_) => {
+                                    match reply.send(()) {
+                                        Ok(_) => {
+                                            println!("Reply sent");
+                                        },
+                                        Err(_) => {
+                                            println!("Cannot send reply");
+                                        }
+                                    }
+                                },
+                                Err(_) => {
+                                    println!("Cannot add track");
+                                },
+                            }
+                        },
+                        None => {}
+                    }
+                    // let pc = pcs.get(&peer_id).unwrap();
+                    // pc.add_track(self.audio_track.clone()).await;
+                    // let _ = reply.send(());
+                    println!("============= Attached peer: {}", peer_id);
                 }
             }
         }
         Ok(())
     }
-
     
     pub async fn set_active_file(&self, key: String) -> Result<(String)> {
+
+        // first check if file exists
         let session_id = self.session_id.clone();
         let session_dir = format!("./sessions/{}", session_id.clone());
 
@@ -179,6 +209,10 @@ impl Broadcaster {
                 Error::S3DownloadError { msg: "Failed to write from s3 stream to local file".to_string() }
             })?;
             byte_count += bytes_len;
+        }
+
+        if byte_count == 0 {
+            return Err(Error::S3DownloadError { msg: "Failed to download file".to_string() });
         }
 
         let file_path = format!("{}/{}.ogg", session_dir, key);

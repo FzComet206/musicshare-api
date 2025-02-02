@@ -39,6 +39,11 @@ struct DownloadRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct DeleteFile {
+    key: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct AddQueue {
     session_id: String,
     key: String,
@@ -48,7 +53,7 @@ struct AddQueue {
 #[derive(Debug, Deserialize)]
 struct RemoveQueue {
     session_id: String,
-    key: String,
+    index: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +82,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/prev_in_queue", post(prev_in_queue))
         .route("/download_notify", get(download_notify))
         .route("/delete_session", get(delete_session))
+        .route("/delete_file", post(delete_file))
         .with_state(mc)
 }
 
@@ -305,10 +311,10 @@ async fn remove_from_queue(
         return Err(Error::SessionNotOwned);
     }
 
-    let key = body.key.clone();
+    let index = body.index.clone();
     let session = mc.get_session(session_id).await?;
 
-    session.remove_from_queue(key).await?;
+    session.remove_from_queue(index).await?;
     
     Ok(Json(json!({
         "status": "ok",
@@ -408,5 +414,55 @@ async fn delete_session(
     Ok(Json(json!({
         "status": "ok",
         "message": "session deleted",
+    }))
+)}
+
+async fn delete_file(
+    ctx:Ctx,
+    State(mc): State<Arc<SessionController>>,
+    Extension(pool): Extension<PgPool>,
+    Json(body): Json<DeleteFile>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - delete_file", "Handler");
+
+    let user_id = ctx.id();
+    let key = body.key.clone();
+
+    // check if user has file
+    let file = sqlx::query("SELECT * FROM files WHERE uuid = $1")
+        .bind(&key)
+        .fetch_one(&pool)
+        .await?;
+
+    if file.get::<i32, &str>("user_id") != user_id.parse::<i32>().unwrap() {
+        return Err(Error::S3Error { msg: "User does not own file".to_string() });
+    }
+
+    // has to remove file from session queue
+    let session = mc.get_session(mc.get_user_session(user_id.clone()).await?).await?;
+    if session.has_file_in_queue(key.clone()).await? {
+        session.remove_key_from_queue(key.clone()).await?;
+    }
+
+    let uuid = file.get::<String, &str>("uuid");
+    // delete file from db
+    sqlx::query("DELETE FROM files WHERE uuid = $1")
+        .bind(&key)
+        .execute(&pool)
+        .await?;
+
+    // delete file from disk
+    mc.file_manager.lock().await.delete_file(uuid.clone()).await?;
+
+    sqlx::query(
+        "DELETE FROM files WHERE uuid = $1"
+    )
+        .bind(uuid.clone())
+        .execute(&pool)
+        .await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "file deleted",
     }))
 )}

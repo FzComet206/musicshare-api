@@ -33,6 +33,8 @@ pub enum Error {
     S3LoadFileError { msg: String },
     ResetFileError { msg: String },
 
+    S3Error { msg: String },
+
     SSEError { msg: String },
 
     BroadcasterError { msg: String },

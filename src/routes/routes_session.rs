@@ -128,7 +128,18 @@ async fn get_offer(
     ).await?;
 
     // await for the rx oneshot before getting offer
-    rx.await.unwrap();
+    // possible deadklock here? session specific !!!!
+    // thread 'tokio-runtime-worker' panicked at src/routes/routes_session.rs:131:14:
+    // called `Result::unwrap()` on an `Err` value: RecvError(())
+    match rx.await {
+        Ok(_) => {
+        },
+        Err(e) => {
+            println!("Error: {:?}", e);
+        }
+    }
+
+    // bug, play file after deletion freezes the session
 
     let id = uuid.clone();
     let offer = session.get_offer(uuid).await?;

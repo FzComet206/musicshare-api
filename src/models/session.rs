@@ -123,6 +123,8 @@ impl Session {
             });
         });
 
+        // tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
         Ok((uuid, rx))
     }
 
@@ -186,9 +188,30 @@ impl Session {
         Ok(())
     }
 
-    pub async fn remove_from_queue(&self, key: String) -> Result<()> {
+    pub async fn remove_from_queue(&self, index: usize) -> Result<()> {
         let mut queue = self.queue.lock().await;
-        match queue.remove(key) {
+        match queue.remove_by_id(index) {
+            Next(key) => {
+                self.play(key).await?;
+                self.ping(queue.get_id()).await?;
+            },
+            Stop => {
+                self.clean_active_file().await?;
+                self.ping(queue.get_id()).await?;
+            },
+            NotFound => {
+                return Err(Error::QueueError { msg: "Index not found".to_string() });
+            },
+            Pass => { 
+                self.ping(queue.get_id()).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn remove_key_from_queue(&self, key: String) -> Result<()> {
+        let mut queue = self.queue.lock().await;
+        match queue.remove_by_key(key) {
             Next(key) => {
                 self.play(key).await?;
                 self.ping(queue.get_id()).await?;
@@ -375,8 +398,20 @@ impl Session {
     pub async fn get_session_owner(&self) -> Result<User> {
         Ok(self.owner.clone())
     }
-}
 
+    pub async fn has_file_in_queue(&self, key: String) -> Result<bool> {
+        let queue = self.queue.lock().await;
+        Ok(queue.has_key(key))
+    }
+
+    pub async fn get_queue_id(&self) -> Result<String> {
+        let queue = self.queue.lock().await;
+        match queue.get_id() {
+            id => Ok(id),
+            _ => Ok("".to_string()),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SessionController{
@@ -451,6 +486,7 @@ impl SessionController{
                 match session {
                     Some(session) => {
                         session.clean_active_file().await?;
+                        session.ping("end".to_string()).await?;
                         sessions.remove(&session_id);
                         user_sessions.retain(|k, v| *v != session_id);
                     },

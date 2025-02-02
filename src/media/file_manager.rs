@@ -347,4 +347,21 @@ impl FileManager {
         processing_user.insert(id, sender);
         Ok(())
     }
+
+    pub async fn delete_file(&self, uuid: String) -> Result<()> {
+
+        // delete the file from s3
+        self.s3_client
+            .delete_object()
+            .bucket("antaresmusicshare")
+            .key(format!("{}.ogg", uuid))
+            .send()
+            .await.map_err(
+                |e| {
+                    Error::S3Error { msg: e.to_string() }
+                }
+            )?;
+
+        Ok(())
+    }
 }

@@ -42,10 +42,9 @@ impl PlayQueue {
         QueueAction::Pass
     }
 
-    pub fn remove(&mut self, key: String) -> QueueAction {
-        let index = self.queue.iter().position(|x| x[0] == key);
+    pub fn remove_by_id(&mut self, index: usize) -> QueueAction {
         match index {
-            Some(i) => {
+            i => {
                 if i < self.curr_index {
                     // shift current index left by 1, because everything got moved up
                     self.curr_index -= 1;
@@ -70,7 +69,45 @@ impl PlayQueue {
 
                 QueueAction::Pass
             },
-            None => QueueAction::NotFound,
+            _ => QueueAction::NotFound,
+        }
+    }
+
+    pub fn remove_by_key(&mut self, key: String) -> QueueAction {
+
+        // remove all items with the same key
+        let mut indexes = Vec::new();
+        for (i, item) in self.queue.iter().enumerate() {
+            if item[0] == key {
+                indexes.push(i);
+            }
+        }
+
+        if indexes.contains(&self.curr_index) {
+            while !indexes.is_empty() {
+                let index = indexes.pop().unwrap();
+
+                if index < self.curr_index {
+                    // shift current index left by 1, because everything got moved up
+                    self.curr_index -= 1;
+                }
+
+                self.queue.remove(index);
+            }
+            return QueueAction::Next(self.queue[self.curr_index][0].clone());
+
+        } else {
+            while !indexes.is_empty() {
+                let index = indexes.pop().unwrap();
+
+                if index < self.curr_index {
+                    // shift current index left by 1, because everything got moved up
+                    self.curr_index-= 1;
+                }
+
+                self.queue.remove(index);
+            }
+            return QueueAction::Pass;
         }
     }
 
@@ -154,5 +191,9 @@ impl PlayQueue {
         }
 
         self.queue[self.curr_index][0].clone()
+    }
+
+    pub fn has_key(&self, key: String) -> bool {
+        self.queue.iter().any(|x| x[0] == key)
     }
 }
