@@ -48,11 +48,12 @@ impl PlayQueue {
                 if i < self.curr_index {
                     // shift current index left by 1, because everything got moved up
                     self.curr_index -= 1;
+                    self.queue.remove(i);
+                    return QueueAction::Pass;
                 }
 
-                self.queue.remove(i);
-
                 if i == self.curr_index {
+                    self.queue.remove(i);
                     // the removed track was the current track
                     if self.queue.is_empty() {
                         self.curr_index = 0;
@@ -66,6 +67,8 @@ impl PlayQueue {
                         return QueueAction::Next(self.queue[self.curr_index][0].clone());
                     }
                 }
+
+                self.queue.remove(i);
 
                 QueueAction::Pass
             },
