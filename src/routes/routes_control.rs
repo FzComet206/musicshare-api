@@ -83,6 +83,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/download_notify", get(download_notify))
         .route("/delete_session", get(delete_session))
         .route("/delete_file", post(delete_file))
+        .route("/delete_all_files", get(delete_all_files))
         .with_state(mc)
 }
 
@@ -447,11 +448,6 @@ async fn delete_file(
     }
 
     let uuid = file.get::<String, &str>("uuid");
-    // delete file from db
-    sqlx::query("DELETE FROM files WHERE uuid = $1")
-        .bind(&key)
-        .execute(&pool)
-        .await?;
 
     // delete file from disk
     mc.file_manager.lock().await.delete_file(uuid.clone()).await?;
@@ -466,5 +462,46 @@ async fn delete_file(
     Ok(Json(json!({
         "status": "ok",
         "message": "file deleted",
+    }))
+)}
+
+async fn delete_all_files(
+    ctx:Ctx,
+    State(mc): State<Arc<SessionController>>,
+    Extension(pool): Extension<PgPool>
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - delete_all_files", "Handler");
+
+    let user_id = ctx.id();
+
+    let files = sqlx::query("SELECT * FROM files WHERE user_id = $1")
+        .bind(&user_id.parse::<i32>().unwrap())
+        .fetch_all(&pool)
+        .await?;
+
+    for file in files {
+        let key = file.get::<String, &str>("uuid");
+        // has to remove file from session queue
+        let session = mc.get_session(mc.get_user_session(user_id.clone()).await?).await?;
+        if session.has_file_in_queue(key.clone()).await? {
+            session.remove_key_from_queue(key.clone()).await?;
+        }
+
+        let uuid = file.get::<String, &str>("uuid");
+
+        // delete file from disk
+        mc.file_manager.lock().await.delete_file(uuid.clone()).await?;
+
+        sqlx::query(
+            "DELETE FROM files WHERE uuid = $1"
+        )
+            .bind(uuid.clone())
+            .execute(&pool)
+            .await?;
+    }
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "all files deleted",
     }))
 )}

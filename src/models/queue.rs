@@ -43,6 +43,11 @@ impl PlayQueue {
     }
 
     pub fn remove_by_id(&mut self, index: usize) -> QueueAction {
+
+        if self.queue.is_empty() {
+            return QueueAction::Pass;
+        }
+
         match index {
             i => {
                 if i < self.curr_index {
@@ -97,6 +102,12 @@ impl PlayQueue {
 
                 self.queue.remove(index);
             }
+
+            if self.queue.is_empty() {
+                self.curr_index = 0;
+                return QueueAction::Stop;
+            }
+            
             return QueueAction::Next(self.queue[self.curr_index][0].clone());
 
         } else {
