@@ -70,6 +70,8 @@ impl FileManager {
     // get the title + url of the content in url
     pub async fn get_title(url: String) -> Result<Vec<(String, String)>> {
         let output = Command::new(YT_DLP_PATH)
+            .arg("--cookies")
+            .arg("./libs/cookies.txt")
             .arg("--get-title")
             .arg(url.clone())
             .output()
@@ -88,10 +90,12 @@ impl FileManager {
     pub async fn get_list(url: String) -> Result<Vec<(String, String)>> {
 
         let output = Command::new(YT_DLP_PATH)
+            .arg("--cookies")
+            .arg("./libs/cookies.txt")
             .arg("--flat-playlist")
             .arg("--dump-single-json")
             .arg("--playlist-end")
-            .arg(env::var("MAX_PLAYLIST_SIZE").unwrap_or("20".to_string()))
+            .arg(env::var("MAX_PLAYLIST_SIZE").unwrap_or("10".to_string()))
             .arg(url.clone())
             .output().await?;
 
@@ -183,6 +187,8 @@ impl FileManager {
 
         // Construct the command to download audio
         let output = Command::new(YT_DLP_PATH)
+            .arg("--cookies")
+            .arg("./libs/cookies.txt")
             .arg("-f")
             .arg("bestaudio") // Best available audio format
             .arg("--extract-audio") // Extract audio only
@@ -275,6 +281,8 @@ impl FileManager {
     pub async fn is_live(url: String) -> Result<(bool)> {
 
         let output = Command::new(YT_DLP_PATH)
+            .arg("--cookies")
+            .arg("./libs/cookies.txt")
             .arg("--print")
             .arg("%(is_live)s")
             .arg(url.clone())
@@ -301,6 +309,8 @@ impl FileManager {
 
         // Run yt-dlp to get the file size
         let output = Command::new(yt_dlp_path)
+            .arg("--cookies")
+            .arg("./libs/cookies.txt")
             .arg("-f")
             .arg("bestaudio") // Specify best audio format
             .arg("--print")
