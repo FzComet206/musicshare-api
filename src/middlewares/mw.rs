@@ -19,10 +19,10 @@ use crate::models::SessionController;
 use tower_cookies::{Cookie, Cookies};
 
 /// Trivial middleware that requires a valid context (set by a previous resolver).
-pub async fn mw_require_auth<B>(
+pub async fn mw_require_auth(
     ctx: Result<Ctx>,
-    req: Request<B>,
-    next: Next<B>,
+    req: Request<Body>,
+    next: Next,
 ) -> Result<Response> {
     // Fail immediately if the context is not valid.
     ctx?;
@@ -30,10 +30,10 @@ pub async fn mw_require_auth<B>(
 }
 
 /// A no-op middleware (you may remove or extend it as needed).
-pub async fn mw_optional_auth<B>(
+pub async fn mw_optional_auth(
     _ctx: Result<Ctx>,
-    req: Request<B>,
-    next: Next<B>,
+    req: Request<Body>,
+    next: Next,
 ) -> Result<Response> {
     Ok(next.run(req).await)
 }
@@ -119,12 +119,12 @@ async fn resolve_ctx_with_auth_token(pool: &PgPool, auth_token: &str) -> Result<
 
 /// Middleware that *requires* an auth token and sets a valid context.
 /// Returns an error if the token is missing or invalid.
-pub async fn mw_ctx_resolver<B>(
+pub async fn mw_ctx_resolver(
     State(_mc): State<Arc<SessionController>>,
     cookies: Cookies,
     Extension(pool): Extension<PgPool>,
-    mut req: Request<B>,
-    next: Next<B>,
+    mut req: Request<Body>,
+    next: Next,
 ) -> Result<Response> {
     println!("->> {:12} - ctx_resolver", "Middleware");
 
@@ -143,12 +143,12 @@ pub async fn mw_ctx_resolver<B>(
 
 /// Middleware that attempts to resolve a context if an auth token is present.
 /// Otherwise, it simply inserts a default “anonymous” context.
-pub async fn mw_optional_ctx_resolver<B>(
+pub async fn mw_optional_ctx_resolver(
     State(_mc): State<Arc<SessionController>>,
     cookies: Cookies,
     Extension(pool): Extension<PgPool>,
-    mut req: Request<B>,
-    next: Next<B>,
+    mut req: Request<Body>,
+    next: Next,
 ) -> Result<Response> {
     println!("->> {:12} - optional_ctx_resolver", "Middleware");
 

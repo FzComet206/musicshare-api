@@ -210,8 +210,8 @@ impl FileManager {
             .arg("20000") // Set page duration
             .arg("-vn") // Disable video
             .arg(format!("{}/{}.ogg", converted_dir, uuid)) // Output file
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            // .stdout(Stdio::null())
+            // .stderr(Stdio::null())
             .status()
             .await?;
         

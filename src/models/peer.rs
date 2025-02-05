@@ -51,12 +51,13 @@ impl PeerConnection {
         m.register_default_codecs();
 
         // Create a new API with the MediaEngine
-        let api = APIBuilder::new().with_media_engine(m).build();
+        let api = APIBuilder::new()
+            .with_media_engine(m)
+            .build();
         // Define ICE servers
         let config = RTCConfiguration {
             ice_servers: vec![RTCIceServer {
-                // urls: vec!["stun:stun.l.google.com:19302".to_string()],
-                urls: vec![],
+                urls: vec!["stun:stun.l.google.com:19302".to_string()],
                 ..Default::default()
             }],
             // ice_transport_policy: "all".to_string(),

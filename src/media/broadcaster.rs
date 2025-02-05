@@ -123,7 +123,6 @@ impl Broadcaster {
                     self.stop().await;
                 }
                 BroadcasterCommand::Attach { peer_id, reply } => {
-                    println!("============= Attaching peer: {}", peer_id);
 
                     let pcs = self.peer_connections.lock().await;
                     match pcs.get(&peer_id) {
@@ -132,24 +131,17 @@ impl Broadcaster {
                                 Ok(_) => {
                                     match reply.send(()) {
                                         Ok(_) => {
-                                            println!("Reply sent");
                                         },
                                         Err(_) => {
-                                            println!("Cannot send reply");
                                         }
                                     }
                                 },
                                 Err(_) => {
-                                    println!("Cannot add track");
                                 },
                             }
                         },
                         None => {}
                     }
-                    // let pc = pcs.get(&peer_id).unwrap();
-                    // pc.add_track(self.audio_track.clone()).await;
-                    // let _ = reply.send(());
-                    println!("============= Attached peer: {}", peer_id);
                 }
             }
         }
