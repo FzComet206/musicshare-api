@@ -446,6 +446,38 @@ impl Session {
         }
         Ok(top)
     }
+
+    pub async fn check_owner_connect_duplicate(&self) -> Result<bool> {
+        let peer_connections = self.peer_connections.lock().await;
+        let owner_id = self.owner.id.clone();
+        let mut count = 0;
+        for (_, pc) in peer_connections.iter() {
+            if let Ok(listener_id) = pc.get_listener_id().await {
+                if listener_id == owner_id && *pc.active.lock().await {
+                    count += 1;
+                }
+            }
+        }
+
+        if count >= 2 {
+            return Ok(true);
+        } else {
+            return Ok(false);
+        }
+    }
+
+    pub async fn disconnect(&self, peerid: String) -> Result<()> {
+        let mut peer_connections = self.peer_connections.lock().await;
+        match peer_connections.get_mut(&peerid) {
+            Some(pc) => {
+                let mut active = pc.active.lock().await;
+                *active = false;
+                pc.update.lock().await.send("connection".to_string());
+            },
+            None => return Err(Error::SessionError { msg: "Peer not found".to_string() }),
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]

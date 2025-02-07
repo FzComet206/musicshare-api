@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use std::collections::HashMap;
 
+const COOKIES_PATH: &str = "./libs/cookies.txt";
 const YT_DLP_PATH: &str = "./libs/yt-dlp";
 const FFMPEG_PATH: &str = "./libs/ffmpeg";
 
@@ -59,7 +60,7 @@ impl FileManager {
         Ok(Self {
             semaphore,
             max_file_size: env::var("MAX_FILE_SIZE")
-                .unwrap_or("100000000".to_string())
+                .unwrap_or("10000000".to_string())
                 .parse::<u64>()
                 .expect("MAX_FILE_SIZE must be a number"),
             s3_client: client,
@@ -71,7 +72,7 @@ impl FileManager {
     pub async fn get_title(url: String) -> Result<Vec<(String, String)>> {
         let output = Command::new(YT_DLP_PATH)
             .arg("--cookies")
-            .arg("./libs/cookies.txt")
+            .arg(COOKIES_PATH)
             .arg("--get-title")
             .arg(url.clone())
             .output()
@@ -91,7 +92,7 @@ impl FileManager {
 
         let output = Command::new(YT_DLP_PATH)
             .arg("--cookies")
-            .arg("./libs/cookies.txt")
+            .arg(COOKIES_PATH)
             .arg("--flat-playlist")
             .arg("--dump-single-json")
             .arg("--playlist-end")
@@ -172,61 +173,59 @@ impl FileManager {
             }
         }
 
-        let output_dir = "./output";
-        let converted_dir = "./converted";
-
+        println!("processing-start: {}", url);
         // Ensure the output directory exists
-        if !Path::new(output_dir).exists() {
-            tokio::fs::create_dir_all(output_dir).await?;
-        }
-
+        let converted_dir = "./converted";
         if !Path::new(converted_dir).exists() {
             tokio::fs::create_dir_all(converted_dir).await?;
         }
 
+        let output_path = format!("{}/{}.ogg", converted_dir, uuid);
 
-        // Construct the command to download audio
         let output = Command::new(YT_DLP_PATH)
-            .arg("--cookies")
-            .arg("./libs/cookies.txt")
-            .arg("-f")
-            .arg("bestaudio") // Best available audio format
-            .arg("--extract-audio") // Extract audio only
-            .arg("--audio-format")
-            .arg("mp3") // Convert audio to OGG format
-            .arg("--output")
-            .arg(format!("{}/{}", output_dir, uuid)) // Set output file format
+            // Supply cookies
+            .args(&["--cookies", COOKIES_PATH])
+            // Point yt-dlp to custom FFmpeg
+            .args(&["--ffmpeg-location", FFMPEG_PATH])
+            // Use a sleep interval. If the range "0.5-1.5" is unsupported in your yt-dlp version,
+            // replace the next line with:
+            .args(&["--sleep-interval", "0.1", "--max-sleep-interval", "4"])
+            // .args(&["--sleep-interval", "1"])
+            // .args(&["--sleep-interval", "0.5", "--max-sleep-interval", "1.5"])
+            // Download best available audio
+            .args(&["-f", "bestaudio"])
+            // Extract audio in one step
+            .arg("-x")
+            // Remove --audio-format to avoid yt-dlp renaming to .opus
+            // (We'll let FFmpeg produce an Ogg container with Opus directly)
+            // .args(&["--audio-format", "opus"])
+            // Pass FFmpeg options to encode Opus in Ogg at 128 kbps with page duration
+            .args(&[
+                "--postprocessor-args",
+                "ffmpeg:-c:a libopus -b:a 128k -page_duration 20000 -f ogg"
+            ])
+            // Explicitly name the final file .ogg
+            .args(&["-o", &output_path])
+            // Finally, the video URL
             .arg(url.clone())
+            // Consider removing Stdio::null() if you want to see any errors or logs
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .output()
             .await?;
         
+        println!("processing-end: {}", url);
+        
         if !output.status.success() {
             return Err(Error::DownloadFailed { url: url.to_string() });
         }
 
-        let convert = Command::new(FFMPEG_PATH)
-            .arg("-y")
-            .arg("-i")
-            .arg(format!("{}/{}.mp3", output_dir, uuid)) // Input file
-            .arg("-c:a")
-            .arg("libopus") // Use Opus codec
-            .arg("-page_duration")
-            .arg("20000") // Set page duration
-            .arg("-vn") // Disable video
-            .arg(format!("{}/{}.ogg", converted_dir, uuid)) // Output file
-            // .stdout(Stdio::null())
-            // .stderr(Stdio::null())
-            .status()
-            .await?;
-        
-        // remove the downloaded file mp3
-        tokio::fs::remove_file(format!("{}/{}.mp3", output_dir, uuid)).await?;
 
-        if !convert.success() {
-            return Err(Error::ConversionFailed { url: url.to_string() });
-        }
+        let change_file_name = Command::new("mv")
+            .arg(format!("{}/{}.ogg.opus", converted_dir, uuid))
+            .arg(format!("{}/{}.ogg", converted_dir, uuid))
+            .output()
+            .await?;
 
         // upload the file to s3
         let body = aws_sdk_s3::primitives::ByteStream::from_path(
@@ -245,12 +244,12 @@ impl FileManager {
             .map_err(
                 // delete files if upload failed
                 |e| {
-                    tokio::fs::remove_file(format!("{}/{}.mp3", output_dir, uuid));
                     tokio::fs::remove_file(format!("{}/{}.ogg", converted_dir, uuid));
                     Error::UploadFailed { msg: e.to_string() }
                 }
             )?;
 
+        println!("upload done: {}", url);
         // delete the files in convert
         tokio::fs::remove_file(format!("{}/{}.ogg", converted_dir, uuid)).await?;
 
@@ -260,7 +259,7 @@ impl FileManager {
             VALUES ($1, $2, $3, $4)
             ")
             .bind(userid)
-            .bind(url)
+            .bind(url.clone())
             .bind(uuid.clone())
             .bind(title)
             .execute(&pool)
@@ -273,6 +272,8 @@ impl FileManager {
             }
         
         let sender = self.get_sender_with_id(params.userid.clone()).await?;
+
+        println!("task done: {}", url);
         sender.send("check".to_string()).unwrap_or(0);
         Ok(())
     }
@@ -282,7 +283,7 @@ impl FileManager {
 
         let output = Command::new(YT_DLP_PATH)
             .arg("--cookies")
-            .arg("./libs/cookies.txt")
+            .arg(COOKIES_PATH)
             .arg("--print")
             .arg("%(is_live)s")
             .arg(url.clone())
@@ -310,7 +311,7 @@ impl FileManager {
         // Run yt-dlp to get the file size
         let output = Command::new(yt_dlp_path)
             .arg("--cookies")
-            .arg("./libs/cookies.txt")
+            .arg(COOKIES_PATH)
             .arg("-f")
             .arg("bestaudio") // Specify best audio format
             .arg("--print")

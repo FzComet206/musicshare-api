@@ -210,4 +210,8 @@ impl PeerConnection {
     pub async fn get_profile(&self) -> Result<Listener> {
         Ok(self.listener.clone())
     }
+
+    pub async fn get_listener_id(&self) -> Result<String> {
+        Ok(self.listener.id.clone())
+    }
 }

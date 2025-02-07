@@ -68,6 +68,12 @@ struct SessionID {
     session_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct SPID {
+    session_id: String,
+    peer_id: String,
+}
+
 #[derive(Debug, Serialize)]
 struct SessionPreview {
     session_id: String,
@@ -97,6 +103,7 @@ pub fn routes(mc: Arc<SessionController>) -> Router {
         .route("/session_stats", get(get_session_stats))
         .route("/session_listeners", get(get_session_listeners))
         .route("/browse", get(browse_sesions))
+        .route("/leave", get(leave_session))
         .with_state(mc)
 }
 
@@ -136,6 +143,22 @@ async fn get_offer(
     println!("->> {:<12} - get_offer - {:<12}", "Handler", ctx.name());
 
     let mut session = mc.get_session(params.session_id).await?;
+
+    if session.get_session_owner().await?.id == ctx.id() {
+        if session.check_owner_connect_duplicate().await? {
+            return Err(Error::SessionError {
+                msg: "Owner already connected".to_string(),
+            });
+        }
+    }
+
+    // allow max of 5 listeners including the owner
+    if session.get_session_owner().await?.id != ctx.id()
+        && session.get_number_of_listeners().await? >= 5
+    {
+        return Err(Error::SessionFull);
+    }
+
     // let offer = session.get_offer("hi".to_string()).await?;
     let (mut uuid, mut rx) = session.create_peer(
         Listener {
@@ -354,5 +377,20 @@ async fn browse_sesions(
     Ok(Json(json!({
         "status": "ok",
         "sessions": result_sessions,
+    })))
+}
+
+async fn leave_session(
+    State(mc): State<Arc<SessionController>>,
+    Query(params): Query<SPID>,
+) -> Result<Json<Value>> {
+    println!("->> {:<12} - leave_session", "Handler");
+
+    let session = mc.get_session(params.session_id).await?;
+    session.disconnect(params.peer_id).await?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Session left",
     })))
 }

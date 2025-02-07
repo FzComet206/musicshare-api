@@ -41,11 +41,14 @@ pub enum Error {
 
     SessionExists,
     SessionNotOwned,
+    SessionFull,
+    SessionError { msg: String },
 }
 
 #[derive(Clone, Debug)]
 pub enum ClientError {
     SessionExists,
+    SessionFull,
 }
 
 
@@ -65,9 +68,10 @@ impl IntoResponse for ClientError {
 
         // return a response with the error code and message
         // return the error type and message
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("{:?}", self)).into_response()
+        (StatusCode::BAD_REQUEST, format!("{:?}", self)).into_response()
     }
 }
+
 
 impl From<webrtc::Error> for Error {
     fn from(err: webrtc::Error) -> Self {
