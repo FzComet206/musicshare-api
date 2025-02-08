@@ -95,6 +95,7 @@ impl Session {
         };
 
         session.autoplay_loop().await?;
+        session.peer_collector_loop().await?;
 
         Ok(session)
     }
@@ -322,6 +323,38 @@ impl Session {
 
                     },
                     _ => (),
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    pub async fn peer_collector_loop(&self) -> Result<()> {
+
+        let peer_connections = self.peer_connections.clone();
+        let broadcaster = self.broadcaster.clone();
+        let queue = self.queue.clone();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                let mut peer_connections = peer_connections.lock().await;
+                let mut to_remove = Vec::new();
+                for (uuid, pc) in peer_connections.iter() {
+                    let active = pc.active.lock().await;
+                    if !*active {
+                        to_remove.push(uuid.clone());
+                    }
+                }
+
+                for uuid in to_remove {
+                    match peer_connections.remove(&uuid) {
+                        Some(pc) => {
+                            println!("->> Cleaning up peer: {}", uuid);
+                        },
+                        None => (),
+                    }
                 }
             }
         });
@@ -650,6 +683,7 @@ impl SessionController{
         tokio::spawn(async move {
             println!("->> Starting session collector loop");
             loop {
+
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 let mut sessions = sessions.lock().await;
                 let mut user_sessions = user_sessions.lock().await;
