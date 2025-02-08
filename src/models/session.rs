@@ -379,6 +379,7 @@ impl Session {
         Ok(update.clone())
     }
 
+    // ping the browser with sse for a sesison update
     pub async fn ping(&self, msg: String) -> Result<()> {
         let sender = self.update.lock().await;
 
@@ -389,7 +390,6 @@ impl Session {
     }
 
     pub async fn get_session_start_time(&self) -> Result<u64> {
-        // convert Instant to u64
         Ok(self.start_time)
     }
 
@@ -478,8 +478,17 @@ impl Session {
         }
         Ok(())
     }
+
+    pub async fn is_queue_empty(&self) -> Result<bool> {
+        let queue = self.queue.lock().await;
+        Ok(queue.is_empty())
+    }
 }
 
+
+
+
+// Main controller of this application
 #[derive(Clone, Debug)]
 pub struct SessionController{
     pub sessions: Arc<Mutex<HashMap<String, Option<Session>>>>,
@@ -490,11 +499,16 @@ pub struct SessionController{
 impl SessionController{
 
     pub async fn new() -> Result<Self> {
-        Ok(Self {
+
+        let session_controller = Self {
             sessions: Arc::default(),
             user_sessions: Arc::default(),
             file_manager: Arc::new(Mutex::new(FileManager::new().await?)),
-        })
+        };
+
+        session_controller.session_collector_loop().await?;
+
+        Ok(session_controller)
     }
 
     pub async fn create_session(&self, user_id: String, user: User) -> Result<(String)> {
@@ -624,5 +638,57 @@ impl SessionController{
             },
             None => Ok("".to_string()),
         }
+    }
+
+    // session collection that runs every 10 seconds and delete sessions with no listeners and no queue items
+    pub async fn session_collector_loop(&self) -> Result<()> {
+
+        // counted reference
+        let sessions = self.sessions.clone();
+        let user_sessions = self.user_sessions.clone();
+
+        tokio::spawn(async move {
+            println!("->> Starting session collector loop");
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                let mut sessions = sessions.lock().await;
+                let mut user_sessions = user_sessions.lock().await;
+
+                let mut to_remove = Vec::new();
+                for (id, session) in sessions.iter() {
+                    match session {
+                        Some(session) => {
+                            let num_listeners = session.get_number_of_listeners().await.unwrap_or(0);
+                            let is_empty = session.is_queue_empty().await.unwrap_or(true);
+                            if num_listeners == 0 && is_empty {
+                                to_remove.push(id.clone());
+                            }
+                        },
+                        None => (),
+                    }
+                }
+
+                for id in to_remove {
+                    match sessions.get(&id) {
+                        Some(session) => {
+                            match session {
+                                Some(session) => {
+                                    println!("->> Cleaning up session: {}", id);
+                                    session.clean_active_file().await.unwrap();
+                                    session.clean_session_dir().await.unwrap();
+                                    // session.ping("end".to_string()).await.unwrap();
+                                    sessions.remove(&id);
+                                    user_sessions.retain(|k, v| *v != id);
+                                },
+                                None => (),
+                            }
+                        },
+                        None => (),
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 }

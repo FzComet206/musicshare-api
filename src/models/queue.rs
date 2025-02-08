@@ -218,4 +218,8 @@ impl PlayQueue {
 
         self.queue[index][1].clone()
     }
+    
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
 }

@@ -81,11 +81,11 @@ impl PeerConnection {
 
     pub async fn add_track(&self, track: Arc<TrackLocalStaticSample>) -> Result<()> {
         let rtp_sender = self.peer_connection.add_track(track).await?;
-        tokio::spawn(async move {
-            let mut rtcp_buf = vec![0u8; 1500];
-            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            Result::<()>::Ok(())
-        });
+        // tokio::spawn(async move {
+            // let mut rtcp_buf = vec![0u8; 1500];
+            // while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            // Result::<()>::Ok(())
+        // });
         Ok(())
     }
 
