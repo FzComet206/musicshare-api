@@ -343,7 +343,10 @@ impl Session {
                 let mut to_remove = Vec::new();
                 for (uuid, pc) in peer_connections.iter() {
                     let active = pc.active.lock().await;
-                    if !*active {
+                    if !*active 
+                    // give peer 10 seconds to connect
+                        && pc.start_time + 10000 < SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+                    {
                         to_remove.push(uuid.clone());
                     }
                 }
@@ -694,7 +697,11 @@ impl SessionController{
                         Some(session) => {
                             let num_listeners = session.get_number_of_listeners().await.unwrap_or(0);
                             let is_empty = session.is_queue_empty().await.unwrap_or(true);
-                            if num_listeners == 0 && is_empty {
+                            if num_listeners == 0 
+                                && is_empty 
+                                // if session start time is more than 10 seconds ago
+                                && session.start_time + 10000 < SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+                            {
                                 to_remove.push(id.clone());
                             }
                         },

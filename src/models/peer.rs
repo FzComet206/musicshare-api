@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 use tokio::sync::Notify;
 
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -41,6 +42,7 @@ pub struct PeerConnection{
     pub is_gathering_complete: Arc<Mutex<bool>>,
     pub update: Arc<Mutex<broadcast::Sender<String>>>,
     pub listener: Listener,
+    pub start_time: u64,
 }
 
 impl PeerConnection {
@@ -76,22 +78,23 @@ impl PeerConnection {
             is_gathering_complete: Arc::new(Mutex::new(false)),
             update,
             listener,
+            start_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
         }
     }
 
     pub async fn add_track(&self, track: Arc<TrackLocalStaticSample>) -> Result<()> {
         let rtp_sender = self.peer_connection.add_track(track).await?;
-        // tokio::spawn(async move {
-            // let mut rtcp_buf = vec![0u8; 1500];
-            // while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            // Result::<()>::Ok(())
-        // });
+        tokio::spawn(async move {
+            let mut rtcp_buf = vec![0u8; 1500];
+            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            Result::<()>::Ok(())
+        });
         Ok(())
     }
 
     pub async fn get_offer(& mut self) -> Result<String> {
 
-        let pc = &mut self.peer_connection;
+        let pc = &self.peer_connection;
 
         // Use an Arc<Mutex> for `self.active` to make it thread-safe and `'static`
         let name = self.listener.name.clone();
@@ -105,18 +108,23 @@ impl PeerConnection {
         let active = Arc::clone(&self.active); // Assume self.active is Arc<Mutex<bool>>
         let update = self.update.lock().await.clone();
 
+        let pc_clone = Arc::clone(&self.peer_connection);
         pc.on_peer_connection_state_change(Box::new(move |state| {
 
+            let _pc_clone = Arc::clone(&pc_clone);
             let _update = update.clone();
             let active = Arc::clone(&active);
 
             Box::pin(async move {
 
-                let mut active = active.lock().await;
                 if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
 
-                    *active = true;
-                    println!("");
+                    // prevent deadlock
+                    {
+                        let mut active = active.lock().await;
+                        *active = true;
+                        println!("");
+                    }
 
                     match _update.send("connection".to_string()) {
                         Ok(_) => {},
@@ -128,13 +136,20 @@ impl PeerConnection {
 
                 if state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected {
 
-                    *active = false;
+                    {
+                        let mut active = active.lock().await;
+                        *active = false;
+                    }
 
                     match _update.send("connection".to_string()) {
                         Ok(_) => {},
                         Err(err) => {
                             eprintln!("Error: {:?}", err);
                         },
+                    }
+
+                    if let Err(err) = _pc_clone.close().await {
+                        eprintln!("Error: {:?}", err);
                     }
                 }
             })
